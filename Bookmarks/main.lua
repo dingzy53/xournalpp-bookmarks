@@ -1,11 +1,26 @@
-
 utf8_to_html = require("utf8_to_html")
 
 DEFAULT_EXPORT_PATH = "/tmp/temp"
 
+-- Helper to safely escape strings for bash commands
+function bash_escape(str)
+  if not str then return "''" end
+  return "'" .. string.gsub(str, "'", "'\\''") .. "'"
+end
+
+-- Helper to run zenity and cleanly handle user cancellations
+function run_zenity(cmd)
+  local handle = io.popen(cmd)
+  local result = handle:read("*a")
+  local success = handle:close()
+  if result then result = string.gsub(result, "\n", "") end
+  -- If not successful (e.g., Cancel clicked) and no text returned, return nil
+  if not success and result == "" then return nil end
+  return result
+end
+
 -- Register Toolbar
 function initUi()
-
   app.registerUi({menu="Previous Bookmark", toolbarId="CUSTOM_PREVIOUS_BOOKMARK", callback="search_bookmark", mode=-1, iconName="go-previous"})
   app.registerUi({menu="New Bookmark", toolbarId="CUSTOM_NEW_BOOKMARK", callback="dialog_new_bookmark", iconName="bookmark-new-symbolic"})
   app.registerUi({menu="New Bookmark (No dialog)", toolbarId="CUSTOM_NEW_BOOKMARK_NO_DIALOG", callback="new_bookmark", iconName="bookmark-new-symbolic"})
@@ -21,9 +36,7 @@ function initUi()
 end
 
 function new_bookmark(name)
-
   local structure = app.getDocumentStructure()
-
   local currentPage = structure.currentPage
   local currentLayerID = structure.pages[currentPage].currentLayer
 
@@ -53,7 +66,6 @@ end
 
 -- mode = -1 for searching backwards, or 1 for searching forwards
 function search_bookmark(mode)
-
   local structure = app.getDocumentStructure()
   local currentPage = structure.currentPage
   local numPages = #structure.pages
@@ -80,210 +92,111 @@ function search_bookmark(mode)
 
   app.setCurrentPage(nextBookmark)
   app.scrollToPage(nextBookmark)
-
 end
 
 function dialog_new_bookmark()
-  local hasLgi, lgi = pcall(require, "lgi")
-  if not hasLgi then
-    new_bookmark()
-    return
-  end
-
-  local Gtk = lgi.require("Gtk", "3.0")
-  local Gdk = lgi.Gdk
-  local assert = lgi.assert
-  local builder = Gtk.Builder()
-  assert(builder:add_from_file(sourcePath .. "dlgNew.glade"))
-  local ui = builder.objects
-  local dialog = ui.dlgNew
-  local title = "New bookmark"
-  local defaultName=""
-
-  dialog:set_title(title)
-  ui.entryName:set_text(defaultName)
-
-  local function ok()
-    local name = ui.entryName:get_text()
+  local cmd = 'zenity --entry --title="New Bookmark" --text="Enter bookmark name:"'
+  local name = run_zenity(cmd)
+  
+  -- If the user didn't hit cancel
+  if name ~= nil then
     new_bookmark(name)
-    dialog:destroy()
   end
-
-  function ui.btnNewOk.on_clicked()
-    ok()
-  end
-
-  function ui.entryName.on_activate()
-    ok()
-  end
-
-  function ui.btnNewCancel.on_clicked()
-    dialog:destroy()
-  end
-
-  dialog:show_all()
 end
 
 function view_bookmarks()
+  local structure = app.getDocumentStructure()
+  local numPages = #structure.pages
+  
+  local cmd = 'zenity --list --title="Bookmark Manager" --width=500 --height=400 --text="Select a bookmark to manage:" --column="ID" --column="Page" --column="Name" --hide-column=1'
+  local hasBookmarks = false
 
-  local hasLgi, lgi = pcall(require, "lgi")
-  if not hasLgi then
-    app.msgbox("You need to have the Lua lgi-module installed and included in your Lua package path in order view bookmarks\n", {[1]="OK"})
-    return
-  end
-
-
-  local Gtk = lgi.require("Gtk", "3.0")
-  local Gdk = lgi.Gdk
-  local assert = lgi.assert
-  local builder = Gtk.Builder()
-  assert(builder:add_from_file(sourcePath .. "dlgBookmarks.glade"))
-  local ui = builder.objects
-  local dialog = ui.dlgBookmarks
-
-  local column = {
-    PAGE = 1,
-    DISPLAY_NAME = 2,
-    NAME = 3,
-    LAYER_ID = 4,
-  }
-
-  local store = Gtk.ListStore.new {
-    [column.PAGE] = lgi.GObject.Type.UINT,
-    [column.DISPLAY_NAME] = lgi.GObject.Type.STRING,
-    [column.NAME] = lgi.GObject.Type.STRING,
-    [column.LAYER_ID] = lgi.GObject.Type.UINT,
-  }
-
-  -- they're going to be set immediately after
-  local structure
-  local numPages
-
-  local function updateTable()
-    structure = app.getDocumentStructure()
-    numPages = #structure.pages
-    store:clear()
-    for page=1, numPages do
-      for u,v in pairs(structure.pages[page].layers) do
-        if v.name:sub(1,10) == "Bookmark::" then
-          if v.name:sub(11) == "" then
-            store:append({page, "(No name)", "", u})
-          else
-            store:append({page, v.name:sub(11), v.name:sub(11), u})
-          end
-        end
+  for page=1, numPages do
+    for u,v in pairs(structure.pages[page].layers) do
+      if v.name:sub(1,10) == "Bookmark::" then
+        hasBookmarks = true
+        local display_name = v.name:sub(11)
+        if display_name == "" then display_name = "(No name)" end
+        
+        -- ID is formatted as "Page_LayerID" so we know exactly which one to modify
+        local unique_id = tostring(page) .. "_" .. tostring(u)
+        cmd = cmd .. string.format(" %s %s %s", bash_escape(unique_id), bash_escape(tostring(page)), bash_escape(display_name))
       end
     end
   end
 
-  updateTable()
-
-  local treeView = Gtk.TreeView {
-    model = store,
-    Gtk.TreeViewColumn {
-      title = "Page",
-      sizing = "FIXED",
-      fixed_width = 70,
-      {
-        Gtk.CellRendererText {},
-        {text = column.PAGE},
-      },
-    },
-    Gtk.TreeViewColumn {
-      title = "Name",
-      {
-        Gtk.CellRendererText { id = "nameColumn"},
-        {text = column.DISPLAY_NAME},
-      },
-    },
-  }
-
-  ui.scrolledWindow:add(treeView)
-
-  function ui.btnNew.on_clicked()
-    local newPage, newName = edit_bookmark("New Bookmark", 1, "")
-    if newPage == nil then return end
-    app.setCurrentPage(newPage)
-    new_bookmark(newName)
-    updateTable()
+  if not hasBookmarks then
+    app.msgbox("No bookmarks exist in this document.", {[1]="OK"})
+    return
   end
 
-  function ui.btnEdit.on_clicked()
-    local model, data = treeView:get_selection():get_selected()
-    if data == nil then return end
-    local oldPage, oldName, oldLayerID = model[data][column.PAGE], model[data][column.NAME], model[data][column.LAYER_ID]
-    local newPage, newName = edit_bookmark("Edit Bookmark", oldPage, oldName)
+  -- 1. Get the selected bookmark
+  local selected_id = run_zenity(cmd)
+  if selected_id == nil or selected_id == "" then return end -- Cancelled
 
-    if newPage == nil then return end
-    if oldPage == newPage then
-      app.setCurrentPage(oldPage)
-      local currentLayerID = structure.pages[oldPage].currentLayer
-      app.setCurrentLayer(oldLayerID)
-      app.setCurrentLayerName("Bookmark::" .. newName)
-      app.setCurrentLayer(currentLayerID)
-    else
-      delete_layer(oldPage, oldLayerID)
-      app.setCurrentPage(newPage)
-      new_bookmark(newName)
+  local page_str, layer_str = selected_id:match("(%d+)_(%d+)")
+  local oldPage = tonumber(page_str)
+  local oldLayerID = tonumber(layer_str)
+
+  -- Get old name directly from structure
+  local oldName = ""
+  for u,v in pairs(structure.pages[oldPage].layers) do
+    if u == oldLayerID then
+      oldName = v.name:sub(11)
+      break
     end
-    updateTable()
   end
 
-  function ui.btnDelete.on_clicked()
-    local model, data = treeView:get_selection():get_selected()
-    if data == nil then return end
-    local page, layerID = model[data][column.PAGE], model[data][column.LAYER_ID]
-    delete_layer(page, layerID)
-    updateTable()
-  end
+  -- 2. Ask what to do with it
+  local action_cmd = 'zenity --list --title="Bookmark Action" --text="Action for: ' .. bash_escape(oldName) .. '" --column="Action" "Jump To" "Edit" "Delete"'
+  local action = run_zenity(action_cmd)
 
-  function ui.btnJumpTo.on_clicked()
-    local model, data = treeView:get_selection():get_selected()
-    if data == nil then return end
-    local page = model[data][column.PAGE]
-    app.setCurrentPage(page)
-    app.scrollToPage(page)
-  end
-
-  function ui.btnDone.on_clicked()
-    dialog:destroy()
-  end
-
-  function edit_bookmark(title, defaultPage, defaultName)
-    local builder = Gtk.Builder()
-    assert(builder:add_from_file(sourcePath .. "dlgEdit.glade"))
-    local ui = builder.objects
-    local dialog = ui.dlgEdit
-
-    returnData = {}
-
-    dialog:set_title(title)
-    ui.spbtPageNumber:set_range(1,numPages)
-    ui.spbtPageNumber:set_increments(1,10)
-    ui.spbtPageNumber:set_value(defaultPage)
-    ui.entryName:set_text(defaultName)
-
-    function ui.btnEditOk.on_clicked()
-      returnData[1] = math.floor(ui.spbtPageNumber:get_value() + 0.1)
-      returnData[2] = ui.entryName:get_text()
-      dialog:destroy()
+  if action == "Jump To" then
+    app.setCurrentPage(oldPage)
+    app.scrollToPage(oldPage)
+  elseif action == "Delete" then
+    delete_layer(oldPage, oldLayerID)
+  elseif action == "Edit" then
+    local newPage, newName = edit_bookmark_zenity("Edit Bookmark", oldPage, oldName, numPages)
+    if newPage ~= nil then
+      if oldPage == newPage then
+        app.setCurrentPage(oldPage)
+        local currentLayerID = structure.pages[oldPage].currentLayer
+        app.setCurrentLayer(oldLayerID)
+        app.setCurrentLayerName("Bookmark::" .. newName)
+        app.setCurrentLayer(currentLayerID)
+      else
+        delete_layer(oldPage, oldLayerID)
+        app.setCurrentPage(newPage)
+        new_bookmark(newName)
+      end
     end
+  end
+end
 
-    function ui.btnEditCancel.on_clicked()
-      dialog:destroy()
-    end
-
-    dialog:run()
-    dialog:destroy()
-    return table.unpack(returnData)
+-- Replaces the LGI edit_bookmark function
+function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
+  -- Ask for Page (pre-filled)
+  local page_cmd = string.format('zenity --entry --title=%s --text="Page Number (1-%d):" --entry-text=%s', bash_escape(title), numPages, bash_escape(tostring(defaultPage)))
+  local newPageStr = run_zenity(page_cmd)
+  if newPageStr == nil then return nil end -- Cancelled
+  
+  local newPage = tonumber(newPageStr)
+  if not newPage or newPage < 1 or newPage > numPages then
+    os.execute('zenity --error --text="Invalid page number. Edit cancelled."')
+    return nil
   end
 
-  dialog:show_all()
+  -- Ask for Name (pre-filled)
+  local name_cmd = string.format('zenity --entry --title=%s --text="Bookmark Name:" --entry-text=%s', bash_escape(title), bash_escape(defaultName))
+  local newName = run_zenity(name_cmd)
+  if newName == nil then return nil end -- Cancelled
+
+  return newPage, newName
 end
 
 function export()
-
-  if not os.execute("pdftk") then
+  if not os.execute("pdftk --version > /dev/null 2>&1") then
     app.msgbox("pdftk is missing.", {[1] = "OK"})
     return
   end
@@ -299,8 +212,8 @@ function export()
   if path == nil then return end
 
   local tempData = os.tmpname()
-  if sep == "\\" then tempData = tempData:sub(2) end --on windows, the first character breaks tmpname for some reason
-  local tempPdf = tempData .. "_1337__.pdf" -- if this breaks something, it'd be very impressive
+  if sep == "\\" then tempData = tempData:sub(2) end 
+  local tempPdf = tempData .. "_1337__.pdf" 
 
   app.export({outputFile = tempPdf})
 
