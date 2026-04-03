@@ -1,30 +1,34 @@
-# xournalpp-bookmarks
-A plugin for Xournal++ that allows bookmarks.
+# Xournal++ Bookmarks (Zenity Version)
 
-It does so by creating invisible layers that act as bookmarks. It comes with toolbar icons, and it can also export to pdf with the bookmarks included.
+This is a fork of [Bookmarks plugin by Jereyes](https://github.com/jereyes4/xournalpp-bookmarks). 
 
-This plugin should work at least on version 1.2.3.
+This fork entirely removes the `lgi` dependency and replaces all user interface elements with **Zenity**.
 
-Please beware in case I've missed some bug, and try to keep backups in case some appear.
+## Prerequisites
+No Lua modules required.
 
-# Instalation
-Copy the folder Bookmarks into the plugin folder of Xournalpp.
+- Xournal++ (Tested on v1.3.4)
+- Zenity: Handles the popup dialogs
+- pdftk
 
-In order to export to pdf with bookmarks, [pdftk](https://www.pdflabs.com/tools/pdftk-server/) is required. On some Linux distributions, it seems to be available as `pdftk-java`.
+**archlinux**:
+```bash
+sudo pacman -S --needed zenity pdftk
+```
 
-In order to use the GUI to manage bookmarks, lua-lgi is required. On Windows one can follow [these instructions](https://github.com/xournalpp/xournalpp/discussions/4522#discussioncomment-8789465) (see below).
+**Windows 11**:
+```bash
+scoop install https://ncruces.github.io/scoop/zenity.json pdftk
+```
 
-# lgi on Windows
-I had some trouble following the above instructions. Here's my fix:
+## Installation
 
-- After installing the mingw packages, one should quit the MSYS2 terminal and use the MSYS2 MINGW64 instead.
-- `mingw-w64-x86_64-gobject-introspection` installs the dependency `mingw-w64-x86_64-gobject-introspection-runtime`, which in its version 1.80.1 breaks something called `g_once_init_enter_pointer` in `libgirepository-1.0-1.dll`, whatever that is. If this is a problem, a dirty way to fix this, is to install everything following the steps as before, and then search in the [MSYS2 repo](https://repo.msys2.org/mingw/mingw64/) for the previous version of the problematic package, namely,
+1. Clone or download this repository.
+2. Move the folder into your local Xournal++ plugins directory.
+    - `~/.config/xournalpp/plugins/` on linux
+    - `%LOCALAPPDATA%\xournalpp\plugins\` on Windows 11
+3. Open Xournal++
+4. Go to Plugin > Plugin Manager > Enable Bookmarks plugin
 
-      mingw-w64-x86_64-gobject-introspection-runtime-1.78.1-1-any.pkg.tar
-
-  Find the file `\mingw64\bin\libgirepository-1.0-1.dll` inside that archive and replace `C:\msys64\mingw64\bin\libgirepository-1.0-1.dll` with it. (You might want to rename the old one just in case, say `libgirepository-1.0-1.dll.old`).
-
-And voilà.
-
-# Notes
-One is not meant to write on layers labeled as bookmark. At least in version 1.2.3 the layer being displayed in the bottom left corner is bugged and can show random layers at times. For instance, after creating a bookmark it can show that the selected layer is the one the plugin created. But worry not: the selected layer is actually the same as before the operation was done.
+## Known Behaviors
+Xournal++ may briefly show a "Not Responding" label while a Zenity dialog is open.
