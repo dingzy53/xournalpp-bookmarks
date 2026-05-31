@@ -2,21 +2,47 @@ utf8_to_html = require("utf8_to_html")
 
 DEFAULT_EXPORT_PATH = "/tmp/temp"
 
--- Helper to safely escape strings for bash commands
+-- Detect OS: "\\" = Windows, "/" = Linux/Mac
+IS_WINDOWS = (package.config:sub(1,1) == "\\")
+
+-- Helper to safely escape strings for shell commands
 function bash_escape(str)
-  if not str then return "''" end
-  return "'" .. string.gsub(str, "'", "'\\''") .. "'"
+  if IS_WINDOWS then
+    -- Windows cmd: use double quotes
+    if not str then return '""' end
+    return '"' .. string.gsub(str, '"', '\\"') .. '"'
+  else
+    -- Bash: use single quotes
+    if not str then return "''" end
+    return "'" .. string.gsub(str, "'", "'\\''") .. "'"
+  end
 end
 
 -- Helper to run zenity and cleanly handle user cancellations
 function run_zenity(cmd)
+  if IS_WINDOWS then
+    cmd = cmd .. " 2>&1"
+  end
   local handle = io.popen(cmd)
   local result = handle:read("*a")
   local success = handle:close()
   if result then result = string.gsub(result, "\n", "") end
-  -- If not successful (e.g., Cancel clicked) and no text returned, return nil
-  if not success and result == "" then return nil end
+  if IS_WINDOWS then
+    if result == "" then return nil end
+  else
+    -- If not successful (e.g., Cancel clicked) and no text returned, return nil
+    if not success and result == "" then return nil end
+  end
   return result
+end
+
+-- Wrapper for message dialogs (API differs between Xournal++ versions/ports)
+function show_msg(msg, buttons)
+  if IS_WINDOWS then
+    app.openDialog(msg, buttons)
+  else
+    app.msgbox(msg, buttons)
+  end
 end
 
 -- Register Toolbar
@@ -30,7 +56,7 @@ function initUi()
 
   sep = package.config:sub(1,1)
   sourcePath = debug.getinfo(1).source:match("@?(.*" .. sep .. ")")
-  if sep == "\\" then
+  if IS_WINDOWS then
     DEFAULT_EXPORT_PATH = "%TEMP%\\temp"
   end
 end
@@ -86,7 +112,7 @@ function search_bookmark(mode)
   until page == currentPage
 
   if nextBookmark == nil then
-    app.msgbox("No bookmark found.", {[1] = "Ok"})
+    show_msg("No bookmark found.", {[1] = "Ok"})
     return
   end
 
@@ -108,25 +134,47 @@ function view_bookmarks()
   local structure = app.getDocumentStructure()
   local numPages = #structure.pages
   
-  local cmd = 'zenity --list --title="Bookmark Manager" --width=500 --height=400 --text="Select a bookmark to manage:" --column="ID" --column="Page" --column="Name" --hide-column=1'
-  local hasBookmarks = false
+  local cmd, hasBookmarks
+  
+  if IS_WINDOWS then
+    -- Windows: single-column list with combined text
+    cmd = 'zenity --list --title="Bookmark Manager" --width=500 --height=400 --text="Select a bookmark to manage:" --column="Bookmarks"'
+    hasBookmarks = false
 
-  for page=1, numPages do
-    for u,v in pairs(structure.pages[page].layers) do
-      if v.name:sub(1,10) == "Bookmark::" then
-        hasBookmarks = true
-        local display_name = v.name:sub(11)
-        if display_name == "" then display_name = "(No name)" end
-        
-        -- ID is formatted as "Page_LayerID" so we know exactly which one to modify
-        local unique_id = tostring(page) .. "_" .. tostring(u)
-        cmd = cmd .. string.format(" %s %s %s", bash_escape(unique_id), bash_escape(tostring(page)), bash_escape(display_name))
+    for page=1, numPages do
+      for u,v in pairs(structure.pages[page].layers) do
+        if v.name:sub(1,10) == "Bookmark::" then
+          hasBookmarks = true
+          local display_name = v.name:sub(11)
+          if display_name == "" then display_name = "(No name)" end
+          
+          local unique_id = tostring(page) .. "_" .. tostring(u)
+          local combined_text = string.format("[%s] Page %s: %s", unique_id, tostring(page), display_name)
+          cmd = cmd .. " " .. bash_escape(combined_text)
+        end
+      end
+    end
+  else
+    -- Linux: multi-column list
+    cmd = 'zenity --list --title="Bookmark Manager" --width=500 --height=400 --text="Select a bookmark to manage:" --column="ID" --column="Page" --column="Name" --hide-column=1'
+    hasBookmarks = false
+
+    for page=1, numPages do
+      for u,v in pairs(structure.pages[page].layers) do
+        if v.name:sub(1,10) == "Bookmark::" then
+          hasBookmarks = true
+          local display_name = v.name:sub(11)
+          if display_name == "" then display_name = "(No name)" end
+          
+          local unique_id = tostring(page) .. "_" .. tostring(u)
+          cmd = cmd .. string.format(" %s %s %s", bash_escape(unique_id), bash_escape(tostring(page)), bash_escape(display_name))
+        end
       end
     end
   end
 
   if not hasBookmarks then
-    app.msgbox("No bookmarks exist in this document.", {[1]="OK"})
+    show_msg("No bookmarks exist in this document.", {[1]="OK"})
     return
   end
 
@@ -196,10 +244,14 @@ function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
 end
 
 function export()
-  if not os.execute("pdftk --version > /dev/null 2>&1") then
-    app.msgbox("pdftk is missing.", {[1] = "OK"})
+  -- Detect OS to use the correct null device
+  local null_device = IS_WINDOWS and "NUL" or "/dev/null"
+
+  if not os.execute("pdftk --version > " .. null_device .. " 2>&1") then
+    show_msg("pdftk is missing or not in system PATH.", {[1] = "OK"})
     return
   end
+
   local structure = app.getDocumentStructure()
 
   local defaultName = DEFAULT_EXPORT_PATH
