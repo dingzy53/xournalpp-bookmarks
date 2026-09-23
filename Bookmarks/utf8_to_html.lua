@@ -16,7 +16,6 @@ return function (input)
 
       if c & 0xE0 == 0xC0 then
         local v = (c2 & 0x7F) + ((c & 0x1F) << 6)
-        print(v)
         table.insert(output, "&#" .. v .. ";")
       else
         i = i + 1

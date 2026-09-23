@@ -18,6 +18,16 @@ No Lua modules required.
 sudo pacman -S --needed zenity pdftk
 ```
 
+**Fedora**:
+```bash
+sudo dnf install zenity pdftk-java
+```
+
+**Ubuntu / Debian**:
+```bash
+sudo apt install zenity pdftk-java
+```
+
 **Windows 11**:
 ```bash
 scoop install https://ncruces.github.io/scoop/zenity.json pdftk
