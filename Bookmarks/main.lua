@@ -251,7 +251,33 @@ function export_with_bookmarks()
   -- Export base PDF from Xournal++
   app.export({outputFile = tempPdf})
 
-  local ok, err = pdf.add_bookmarks(tempPdf, path, model.collect(structure))
+  local dump, err = pdf.read_dump(tempPdf)
+  if not dump then
+    os.remove(tempPdf)
+    show_msg(err, true)
+    return
+  end
+
+  -- The exported PDF may already carry the background PDF's outline.
+  local bookmarks = model.collect(structure)
+  local keep_existing = false
+  local existing = pdf.count_outline(dump)
+  if existing > 0 and #bookmarks > 0 then
+    local choices = {"Replace it with the plugin bookmarks", "Keep it and append the plugin bookmarks"}
+    local idx = ui.choose("Export to PDF with Bookmarks",
+      "The exported PDF already has an outline with " .. existing .. " entries (from the background PDF).",
+      "Existing outline", choices)
+    if not idx then
+      os.remove(tempPdf)
+      return
+    end
+    keep_existing = (idx == 2)
+  elseif #bookmarks == 0 then
+    keep_existing = true
+  end
+
+  local ok
+  ok, err = pdf.write_outline(tempPdf, path, dump, bookmarks, {keep_existing = keep_existing})
   os.remove(tempPdf)
 
   if not ok then

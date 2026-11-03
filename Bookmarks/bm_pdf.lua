@@ -38,21 +38,52 @@ local function write_file(path, data)
   return true
 end
 
--- Writes `dst` = `src` with the given bookmarks added to its outline.
+-- Read pdftk's metadata dump of `pdf`. Returns the text or nil, error.
+function M.read_dump(pdf)
+  local data = platform.temp_path(".txt")
+  local ok = platform.execute({"pdftk", pdf, "dump_data_utf8", "output", data})
+  local dump = ok and read_file(data)
+  os.remove(data)
+  if not dump then return nil, "Failed to read PDF metadata with pdftk." end
+  return dump
+end
+
+-- Remove all outline records from a dump. Returns the new dump and the
+-- number of removed bookmarks.
+function M.strip_outline(dump)
+  local out, removed, skipping = {}, 0, false
+  for line in (dump .. "\n"):gmatch("([^\n]*)\n") do
+    if line:match("^BookmarkBegin%s*$") then
+      skipping = true
+      removed = removed + 1
+    elseif skipping and line:match("^Bookmark%w+:") then
+      -- part of the current bookmark record
+    else
+      skipping = false
+      out[#out + 1] = line
+    end
+  end
+  while out[#out] == "" do out[#out] = nil end
+  return table.concat(out, "\n") .. "\n", removed
+end
+
+function M.count_outline(dump)
+  local n = 0
+  for _ in dump:gmatch("BookmarkBegin") do n = n + 1 end
+  return n
+end
+
+-- Writes `dst` = `src` with its outline set to `bookmarks`.
+-- `dump` is src's metadata (from read_dump). Unless opts.keep_existing is
+-- set, an outline already present in src (e.g. copied from the background
+-- PDF by Xournal++'s exporter) is replaced instead of being mixed with ours.
 -- Uses the *_utf8 variants of pdftk's commands so titles are plain UTF-8
 -- (the non-utf8 variants need XML entities and mis-handle '&').
 -- Returns true, or false and an error message.
-function M.add_bookmarks(src, dst, bookmarks)
+function M.write_outline(src, dst, dump, bookmarks, opts)
+  opts = opts or {}
+  if not opts.keep_existing then dump = M.strip_outline(dump) end
   local data = platform.temp_path(".txt")
-  if not platform.execute({"pdftk", src, "dump_data_utf8", "output", data}) then
-    os.remove(data)
-    return false, "Failed to read PDF metadata with pdftk."
-  end
-  local dump = read_file(data)
-  if not dump then
-    os.remove(data)
-    return false, "Failed to read temporary metadata file."
-  end
   if not write_file(data, dump .. M.bookmark_records(bookmarks)) then
     os.remove(data)
     return false, "Failed to write temporary metadata file."

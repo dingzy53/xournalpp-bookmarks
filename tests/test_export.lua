@@ -110,4 +110,51 @@ return {
     os.remove(src)
     os.remove(out)
   end},
+
+  {"existing background outline is replaced by default choice", function(T)
+    if not have_pdftk() then return end
+    local f, platform, src, out = setup(T, {outline = {"Orig1", "Orig2"}, pages = {
+      {layers = {{name = "Layer 1"}, {name = "Bookmark::Mine"}}}, {}, {},
+    }})
+    local calls = T.script_dialogs(platform, {"Replace it with the plugin bookmarks"})
+    T.list_eq(outline_of(src), {"Orig1@1:1", "Orig2@1:1"}, "fixture has an outline")
+    export_with_bookmarks()
+    T.eq(#calls, 1, "user was asked")
+    T.list_eq(outline_of(out), {"Mine@1:1"})
+    os.remove(src)
+    os.remove(out)
+  end},
+
+  {"existing background outline can be kept", function(T)
+    if not have_pdftk() then return end
+    local f, platform, src, out = setup(T, {outline = {"Orig1", "Orig2"}, pages = {
+      {}, {layers = {{name = "Layer 1"}, {name = "Bookmark::Mine"}}}, {},
+    }})
+    T.script_dialogs(platform, {"Keep it and append the plugin bookmarks"})
+    export_with_bookmarks()
+    T.list_eq(outline_of(out), {"Orig1@1:1", "Orig2@1:1", "Mine@1:2"})
+    os.remove(src)
+    os.remove(out)
+  end},
+
+  {"cancelling the outline question aborts the export", function(T)
+    if not have_pdftk() then return end
+    local f, platform, src, out = setup(T, {outline = {"Orig1"}, pages = {
+      {layers = {{name = "Layer 1"}, {name = "Bookmark::Mine"}}}, {}, {},
+    }})
+    T.script_dialogs(platform, {false})
+    export_with_bookmarks()
+    T.eq(io.open(out, "rb"), nil, "no output written")
+    os.remove(src)
+  end},
+
+  {"strip_outline removes only bookmark records", function(T)
+    local pdf = require("bm_pdf")
+    local dump = "InfoBegin\nInfoKey: Title\nInfoValue: X\nBookmarkBegin\nBookmarkTitle: A\n" ..
+      "BookmarkLevel: 1\nBookmarkPageNumber: 1\nBookmarkBegin\nBookmarkTitle: B\nBookmarkLevel: 2\n" ..
+      "BookmarkPageNumber: 2\nPageMediaBegin\nPageMediaNumber: 1\n"
+    local stripped, n = pdf.strip_outline(dump)
+    T.eq(n, 2)
+    T.eq(stripped, "InfoBegin\nInfoKey: Title\nInfoValue: X\nPageMediaBegin\nPageMediaNumber: 1\n")
+  end},
 }
