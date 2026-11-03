@@ -149,7 +149,7 @@ function M.file_size(path)
   return size
 end
 
-local function copy_file(from, to)
+function M.copy_file(from, to)
   local i = io.open(from, "rb")
   if not i then return false end
   local o = io.open(to, "wb")
@@ -172,7 +172,7 @@ function M.move_file(from, to)
     if ok and res then return true end
   end
   if os.rename(from, to) then return true end
-  if copy_file(from, to) then
+  if M.copy_file(from, to) then
     os.remove(from)
     return true
   end

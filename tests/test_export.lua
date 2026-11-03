@@ -204,4 +204,52 @@ return {
     os.remove(src)
     os.remove(out)
   end},
+
+  {"import background PDF outline with levels and page mapping", function(T)
+    if not have_pdftk() then return end
+    local platform = require("bm_platform")
+    local pdf = require("bm_pdf")
+    local plain = platform.temp_path("_plain.pdf")
+    local bg = platform.temp_path("_bg ü.pdf")
+    make_pdf(plain, 3)
+    local dump = assert(pdf.read_dump(plain))
+    assert(pdf.write_outline(plain, bg, dump, {
+      {page = 1, title = "Ch 1 & intro", eff = 1}, {page = 2, title = "1.1 日本", eff = 2},
+      {page = 3, title = "1.1.1", eff = 3}, {page = 3, title = "Ch 2", eff = 1},
+    }))
+    os.remove(plain)
+    -- page 2 is an inserted blank page; PDF page 2 is shown on page 3
+    local f = Fake.new({pdfBackgroundFilename = bg, pages = {
+      {pdfPage = 1}, {pdfPage = 0}, {pdfPage = 2}, {pdfPage = 3},
+    }})
+    T.load_plugin(f)
+    import_pdf_outline()
+    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(2), {"Layer 1"})
+    T.list_eq(f:names(3), {"Layer 1", "Bookmark::## 1.1 日本"})
+    T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
+    T.truthy(f.messages[#f.messages].msg:find("Imported 4 bookmarks", 1, true), f.messages[#f.messages].msg)
+
+    -- importing again asks; "Replace" leaves exactly one copy
+    local p = require("bm_platform")
+    T.script_dialogs(p, {"Replace all existing bookmarks"})
+    import_pdf_outline()
+    T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
+    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    os.remove(bg)
+  end},
+
+  {"import reports missing background PDF and skipped pages", function(T)
+    local f = Fake.new({pages = {{}}})
+    T.load_plugin(f)
+    import_pdf_outline()
+    T.truthy(f.messages[1].msg:find("no background PDF", 1, true))
+    local pdf = require("bm_pdf")
+    local list = pdf.parse_outline("BookmarkBegin\nBookmarkTitle: A: b\nBookmarkLevel: 2\nBookmarkPageNumber: 7\n" ..
+      "PageMediaBegin\nPageMediaNumber: 1\n")
+    T.eq(#list, 1)
+    T.eq(list[1].title, "A: b")
+    T.eq(list[1].level, 2)
+    T.eq(list[1].page, 7)
+  end},
 }

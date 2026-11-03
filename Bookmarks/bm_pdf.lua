@@ -75,6 +75,25 @@ function M.count_outline(dump)
   return n
 end
 
+-- Outline entries of a dump, in order: {title, level, page}.
+function M.parse_outline(dump)
+  local list, cur = {}, nil
+  for line in (dump .. "\n"):gmatch("([^\n]*)\n") do
+    line = line:gsub("\r$", "")
+    if line:match("^BookmarkBegin%s*$") then
+      cur = {title = "", level = 1, page = 0}
+      list[#list + 1] = cur
+    elseif cur then
+      local key, value = line:match("^Bookmark(%w+): ?(.*)$")
+      if key == "Title" then cur.title = M.clean_title(value)
+      elseif key == "Level" then cur.level = tonumber(value) or 1
+      elseif key == "PageNumber" then cur.page = tonumber(value) or 0
+      elseif not key then cur = nil end
+    end
+  end
+  return list
+end
+
 -- Writes `dst` = `src` with its outline set to `bookmarks`.
 -- `dump` is src's metadata (from read_dump). Unless opts.keep_existing is
 -- set, an outline already present in src (e.g. copied from the background

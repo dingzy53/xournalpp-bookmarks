@@ -50,6 +50,7 @@ function initUi()
   app.registerUi({menu="Previous Top-Level Bookmark", toolbarId="CUSTOM_PREVIOUS_TOP_BOOKMARK", callback="search_bookmark", mode=-2, iconName="go-first"})
   app.registerUi({menu="Next Top-Level Bookmark", toolbarId="CUSTOM_NEXT_TOP_BOOKMARK", callback="search_bookmark", mode=2, iconName="go-last"})
   app.registerUi({menu="View Bookmarks", toolbarId="CUSTOM_VIEW_BOOKMARKS", callback="view_bookmarks", iconName="user-bookmarks-symbolic"})
+  app.registerUi({menu="Import Bookmarks from PDF Outline", toolbarId="CUSTOM_IMPORT_PDF_OUTLINE", callback="import_pdf_outline", iconName="document-import"})
   app.registerUi({menu="Export to PDF with Bookmarks", toolbarId="CUSTOM_EXPORT_WITH_BOOKMARKS", callback="export_with_bookmarks", iconName="xopp-document-export-pdf"})
 end
 
@@ -325,4 +326,67 @@ function bookmarks_export_to(path)
   else
     show_msg("Successfully exported PDF with bookmarks:\n" .. path, false)
   end
+end
+
+-- Create bookmarks from the outline (table of contents) of the background PDF.
+function import_pdf_outline()
+  local structure = app.getDocumentStructure()
+  local background = structure.pdfBackgroundFilename
+  if not background or background == "" then
+    show_msg("This document has no background PDF to import an outline from.", false)
+    return
+  end
+  if not need("pdftk") then return end
+
+  -- Read a copy in the temp folder: its plain-ASCII path is safe for pdftk
+  -- on Windows and visible to the host's pdftk in Flatpak.
+  local copy = platform.temp_path(".pdf")
+  local source = platform.copy_file(background, copy) and copy or background
+  local dump, err = pdf.read_dump(source)
+  os.remove(copy)
+  if not dump then
+    show_msg(err, true)
+    return
+  end
+  local entries = pdf.parse_outline(dump)
+  if #entries == 0 then
+    show_msg("The background PDF has no outline (table of contents).", false)
+    return
+  end
+
+  -- PDF page -> first document page showing it (pages can be inserted,
+  -- removed or reordered in Xournal++).
+  local page_of = {}
+  for i, p in ipairs(structure.pages) do
+    local n = p.pdfBackgroundPageNo
+    if n and n > 0 and not page_of[n] then page_of[n] = i end
+  end
+
+  local existing = model.collect(structure)
+  if #existing > 0 then
+    if not need("zenity") then return end
+    local choices = {"Replace all existing bookmarks", "Keep existing bookmarks and add the imported ones"}
+    local c = ui.choose("Import Bookmarks from PDF Outline",
+      "This document already has bookmarks.", "Existing bookmarks", choices)
+    if not c then return end
+    if c == 1 then doc.delete_bookmarks(existing) end
+  end
+
+  local imported, skipped = 0, 0
+  for _, e in ipairs(entries) do
+    local page = page_of[e.page]
+    if page then
+      doc.add_bookmark(page, e.title, model.clamp_level(e.level))
+      imported = imported + 1
+    else
+      skipped = skipped + 1
+    end
+  end
+
+  local msg = string.format("Imported %d bookmark%s from the PDF outline.", imported, imported == 1 and "" or "s")
+  if skipped > 0 then
+    msg = msg .. string.format("\n%d entr%s skipped: their PDF page is not in this document.", skipped,
+      skipped == 1 and "y was" or "ies were")
+  end
+  show_msg(msg, false)
 end
