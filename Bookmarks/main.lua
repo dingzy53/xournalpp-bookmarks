@@ -19,36 +19,6 @@ local function parse_bookmark_id(selected_id)
   return tonumber(p), tonumber(l)
 end
 
--- Delete a specific layer on a page safely
-local function delete_layer(page, layerID)
-  local structure = app.getDocumentStructure()
-  local origPage = structure.currentPage
-  local pageInfo = structure.pages[page]
-  if not pageInfo then return end
-
-  local currentLayerID = pageInfo.currentLayer
-  local numLayers = #pageInfo.layers
-
-  app.setCurrentPage(page)
-  app.setCurrentLayer(layerID)
-  doc.delete_current_layer()
-
-  -- Restore active layer safely:
-  -- If deleted layer was active or above, shift active index down
-  local remainingLayers = numLayers - 1
-  if remainingLayers >= 1 then
-    local targetLayer = (currentLayerID >= layerID) and (currentLayerID - 1) or currentLayerID
-    if targetLayer < 1 then targetLayer = 1 end
-    if targetLayer > remainingLayers then targetLayer = remainingLayers end
-    app.setCurrentLayer(targetLayer)
-  end
-
-  -- Restore original page if different
-  if origPage ~= page then
-    app.setCurrentPage(origPage)
-  end
-end
-
 local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
   local newPageStr = ui.entry(title, "Page Number (1-" .. numPages .. "):", tostring(defaultPage))
   if newPageStr == nil then return nil end -- Cancelled
@@ -82,19 +52,10 @@ function initUi()
 end
 
 function new_bookmark(name)
-  local structure = app.getDocumentStructure()
-  local currentPage = structure.currentPage
-  local currentLayerID = structure.pages[currentPage].currentLayer
-
-  doc.new_layer_above_current()
-  if type(name) == "string" and name ~= "" then
-    -- Strip any newlines that would break pdftk syntax
-    app.setCurrentLayerName(model.layer_name((name:gsub("[\r\n]", " "))))
-  else
-    app.setCurrentLayerName(model.layer_name(""))
-  end
-  app.setLayerVisibility(false)
-  app.setCurrentLayer(currentLayerID)
+  if type(name) ~= "string" then name = "" end
+  -- Strip any newlines that would break pdftk syntax
+  name = name:gsub("[\r\n]", " ")
+  doc.add_bookmark(app.getDocumentStructure().currentPage, name)
 end
 
 function dialog_new_bookmark()
@@ -187,20 +148,17 @@ function view_bookmarks()
     app.setCurrentPage(oldPage)
     app.scrollToPage(oldPage)
   elseif action == "Delete" then
-    delete_layer(oldPage, oldLayerID)
+    doc.delete_bookmark(oldPage, oldLayerID)
   elseif action == "Edit" then
     local newPage, newName = edit_bookmark_zenity("Edit Bookmark", oldPage, oldName, numPages)
     if newPage ~= nil then
+      newName = newName:gsub("[\r\n]", " ")
       if oldPage == newPage then
-        app.setCurrentPage(oldPage)
-        local currentLayerID = structure.pages[oldPage].currentLayer
-        app.setCurrentLayer(oldLayerID)
-        app.setCurrentLayerName(model.layer_name(newName))
-        app.setCurrentLayer(currentLayerID)
+        doc.rename_bookmark(oldPage, oldLayerID, newName)
       else
-        delete_layer(oldPage, oldLayerID)
+        doc.delete_bookmark(oldPage, oldLayerID)
+        doc.add_bookmark(newPage, newName)
         app.setCurrentPage(newPage)
-        new_bookmark(newName)
         app.scrollToPage(newPage)
       end
     end

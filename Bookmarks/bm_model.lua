@@ -21,13 +21,14 @@ function M.collect_page(structure, page)
   local list = {}
   local pageInfo = structure.pages[page]
   if not pageInfo then return list end
-  for u, v in pairs(pageInfo.layers) do
-    local title = type(u) == "number" and v and M.title_of(v.name)
+  -- Layer 0 is the page background; its "name" is the background name.
+  for i = 1, #pageInfo.layers do
+    local v = pageInfo.layers[i]
+    local title = v and M.title_of(v.name)
     if title then
-      table.insert(list, {page = page, layer = u, title = title})
+      table.insert(list, {page = page, layer = i, title = title})
     end
   end
-  table.sort(list, function(a, b) return a.layer < b.layer end)
   return list
 end
 
