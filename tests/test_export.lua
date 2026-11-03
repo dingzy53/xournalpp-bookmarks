@@ -178,7 +178,7 @@ return {
   {"export reports a failed Xournal++ export", function(T)
     local f = Fake.new({pages = {{layers = {{name = "Bookmark::A"}}}}, saveAsResult = "/nonexistent/x.pdf"})
     local p = T.load_plugin(f)
-    p.execute = function() return true end -- pretend pdftk exists
+    p.find_tool = function(n) return "/usr/bin/" .. n end -- pretend pdftk exists
     f.on_export = function() end           -- writes nothing
     export_with_bookmarks()
     T.eq(f.messages[#f.messages].error, true)

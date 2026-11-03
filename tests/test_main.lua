@@ -45,7 +45,7 @@ return {
   {"view_bookmarks delete removes the layer", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    T.script_dialogs(platform, {"2_2", "Delete"})
+    T.script_dialogs(platform, {"1", "Delete"})
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1"})
     T.eq(f.currentPage, 1)
@@ -54,7 +54,7 @@ return {
   {"view_bookmarks edit renames in place", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    T.script_dialogs(platform, {"2_2", "Edit", "2", "Renamed"})
+    T.script_dialogs(platform, {"1", "Edit", "2", "Renamed"})
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1", "Bookmark::Renamed"})
   end},
@@ -62,7 +62,7 @@ return {
   {"view_bookmarks edit moves to another page", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    T.script_dialogs(platform, {"2_2", "Edit", "3", "Moved"})
+    T.script_dialogs(platform, {"1", "Edit", "3", "Moved"})
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1"})
     T.list_eq(f:names(3), {"Layer 1", "Bookmark::Moved"})
@@ -72,7 +72,7 @@ return {
     local f = doc()
     local platform = T.load_plugin(f)
     new_bookmark("A")
-    T.script_dialogs(platform, {"2_2", "Delete"})
+    T.script_dialogs(platform, {"1", "Delete"})
     view_bookmarks()
     for _, l in ipairs(f.log) do T.truthy(not l:find("^layerAction"), "deprecated call: " .. l) end
     T.truthy(table.concat(f.log, ","):find("activateAction:layer-new-above-current", 1, true))
@@ -87,7 +87,7 @@ return {
     T.list_eq(f:names(1), {"Layer 1", "Bookmark::A"})
     search_bookmark(1)
     T.eq(#f.messages, 0)
-    platform.execute = function() return true end
+    platform.find_tool = function(n) return "/usr/bin/" .. n end
     export_with_bookmarks() -- cancelled save dialog (saveAs returns "")
     T.eq(f.suggested, "/tmp/temp_export.pdf")
   end},
@@ -152,12 +152,44 @@ return {
   {"bookmark names never reach zenity --text", function(T)
     local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::a <b> & c"}}}}})
     local platform = T.load_plugin(f)
-    local calls = T.script_dialogs(platform, {"1_2", "Edit", "1", "x"})
+    local calls = T.script_dialogs(platform, {"1", "Edit", "1", "x"})
     view_bookmarks()
     for _, argv in ipairs(calls) do
       for _, a in ipairs(argv) do
         T.truthy(not (a:find("^%-%-text=") and a:find("<b>", 1, true)), "name in --text: " .. a)
       end
     end
+  end},
+
+  {"bookmark list on ncruces zenity uses one column", function(T)
+    local f = doc()
+    local platform = T.load_plugin(f)
+    platform.zenity_flavor = function() return "ncruces" end
+    local calls = T.script_dialogs(platform, {"Page 2  —  Two", "Jump To"})
+    view_bookmarks()
+    T.eq(f.currentPage, 2)
+    local argv = calls[1]
+    T.eq(argv[#argv], "Page 2  —  Two")
+    for _, a in ipairs(argv) do T.truthy(a ~= "--hide-column=1", "ncruces has no --hide-column") end
+  end},
+
+  {"bookmark list on GNOME zenity uses a hidden index column", function(T)
+    local f = doc()
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"1|", "Jump To"})
+    view_bookmarks()
+    T.eq(f.currentPage, 2)
+    local joined = table.concat(calls[1], " ")
+    T.truthy(joined:find("--hide-column=1 --print-column=1 1 Page 2 Two", 1, true), joined)
+  end},
+
+  {"missing zenity shows an install hint instead of failing silently", function(T)
+    local f = doc()
+    local platform = T.load_plugin(f)
+    platform.find_tool = function() return nil end
+    dialog_new_bookmark()
+    T.eq(#f.messages, 1)
+    T.truthy(f.messages[1].msg:find("zenity", 1, true))
+    T.eq(f.messages[1].error, true)
   end},
 }

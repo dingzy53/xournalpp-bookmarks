@@ -119,4 +119,28 @@ return {
     package.loaded.bm_platform = nil
     package.loaded.bm_ui = nil
   end},
+
+  {"find_tool searches PATH and Homebrew locations", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    if platform.IS_WINDOWS then return end
+    T.truthy(platform.find_tool("sh"), "sh should be found")
+    T.eq(platform.find_tool("definitely-not-a-tool-xyz"), nil)
+    local dirs = table.concat(platform.search_dirs(), ":")
+    T.truthy(dirs:find("/opt/homebrew/bin", 1, true), "Homebrew (Apple Silicon) searched")
+    T.truthy(dirs:find("/usr/local/bin", 1, true), "Homebrew (Intel) searched")
+    package.loaded.bm_platform = nil
+  end},
+
+  {"zenity flavor detection", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    platform.run = function() return "zenity v0.10.14 darwin/arm64\n", true end
+    T.eq(platform.zenity_flavor(), "ncruces")
+    package.loaded.bm_platform = nil
+    platform = require("bm_platform")
+    platform.run = function() return "4.2.2\n", true end
+    T.eq(platform.zenity_flavor(), "gnome")
+    package.loaded.bm_platform = nil
+  end},
 }

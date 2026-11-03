@@ -29,6 +29,7 @@ function T.load_plugin(fake)
   end
   fake:install()
   local platform = require("bm_platform")
+  platform.zenity_flavor = function() return "gnome" end
   dofile("Bookmarks/main.lua")
   return platform
 end

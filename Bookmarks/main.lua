@@ -13,10 +13,11 @@ local function show_msg(msg, is_error)
   doc.message(msg, is_error)
 end
 
--- Parse the "page_layer" ID returned by the bookmark list
-local function parse_bookmark_id(selected_id)
-  local p, l = selected_id:match("^(%d+)_(%d+)$")
-  return tonumber(p), tonumber(l)
+-- Check that an external tool is installed; explain how to install it if not.
+local function need(tool)
+  if platform.find_tool(tool) then return true end
+  show_msg(platform.install_hint(tool), true)
+  return false
 end
 
 local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
@@ -59,6 +60,7 @@ function new_bookmark(name)
 end
 
 function dialog_new_bookmark()
+  if not need("zenity") then return end
   local name = ui.entry("New Bookmark", "Enter bookmark name:")
   if name ~= nil then
     new_bookmark(name)
@@ -107,33 +109,17 @@ function view_bookmarks()
     show_msg("No bookmarks exist in this document.", false)
     return
   end
+  if not need("zenity") then return end
 
   -- 1. Get the selected bookmark
-  local oldPage, oldLayerID
-  if IS_WINDOWS then
-    -- Windows (ncruces zenity): single column only; paginated for cmd.exe's length limit
-    local items = {}
-    for i, b in ipairs(bookmarks) do
-      items[i] = string.format("[%d_%d] Page %d: %s", b.page, b.layer, b.page, model.display_title(b.title))
-    end
-    local idx = ui.choose("Bookmark Manager", "Select a bookmark to manage:", "Bookmarks", items,
-      {width = 500, height = 400})
-    if not idx then return end -- Cancelled
-    oldPage, oldLayerID = bookmarks[idx].page, bookmarks[idx].layer
-  else
-    -- Linux: multi-column list with a hidden ID column
-    local argv = {"zenity", "--list", "--title=Bookmark Manager", "--width=500", "--height=400",
-      "--text=Select a bookmark to manage:", "--column=ID", "--column=Page", "--column=Name", "--hide-column=1"}
-    for _, b in ipairs(bookmarks) do
-      table.insert(argv, b.page .. "_" .. b.layer)
-      table.insert(argv, tostring(b.page))
-      table.insert(argv, model.display_title(b.title))
-    end
-    local selected_id = platform.run_zenity(argv)
-    if not selected_id or selected_id == "" then return end -- Cancelled
-    oldPage, oldLayerID = parse_bookmark_id(selected_id)
-    if not oldPage or not oldLayerID then return end
+  local rows = {}
+  for i, b in ipairs(bookmarks) do
+    rows[i] = {"Page " .. b.page, model.display_title(b.title)}
   end
+  local idx = ui.choose_rows("Bookmark Manager", "Select a bookmark to manage:", {"Page", "Name"}, rows,
+    {width = 500, height = 400})
+  if not idx or not bookmarks[idx] then return end -- Cancelled
+  local oldPage, oldLayerID = bookmarks[idx].page, bookmarks[idx].layer
 
   local targetLayer = structure.pages[oldPage] and structure.pages[oldPage].layers[oldLayerID]
   local oldName = targetLayer and model.title_of(targetLayer.name) or ""
@@ -173,10 +159,7 @@ function export()
 end
 
 function export_with_bookmarks()
-  if not platform.execute({"pdftk", "--version"}) then
-    show_msg("pdftk is missing or not in system PATH.", true)
-    return
-  end
+  if not need("pdftk") then return end
 
   local structure = app.getDocumentStructure()
 
@@ -218,7 +201,7 @@ function bookmarks_export_to(path)
   local bookmarks = model.collect(structure)
   local keep_existing = false
   local existing = pdf.count_outline(dump)
-  if existing > 0 and #bookmarks > 0 then
+  if existing > 0 and #bookmarks > 0 and platform.find_tool("zenity") then
     local choices = {"Replace it with the plugin bookmarks", "Keep it and append the plugin bookmarks"}
     local idx = ui.choose("Export to PDF with Bookmarks",
       "The exported PDF already has an outline with " .. existing .. " entries (from the background PDF).",

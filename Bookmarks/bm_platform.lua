@@ -8,6 +8,17 @@ local M = {}
 -- "\\" = Windows, "/" = Linux/macOS
 M.IS_WINDOWS = (package.config:sub(1, 1) == "\\")
 
+local is_mac_cache
+-- macOS is a POSIX system; tell it apart from Linux with uname.
+function M.is_mac()
+  if M.IS_WINDOWS then return false end
+  if is_mac_cache == nil then
+    local out = M.exec("uname -s 2>/dev/null")
+    is_mac_cache = (out or ""):match("^Darwin") ~= nil
+  end
+  return is_mac_cache
+end
+
 -- Longest command line we generate. cmd.exe rejects lines over 8191 characters
 -- (after expansion), so stay well below that on Windows.
 M.MAX_COMMAND_LENGTH = M.IS_WINDOWS and 7000 or 1000000
@@ -120,6 +131,93 @@ function M.move_file(from, to)
 end
 
 --------------------------------------------------------------------------------
+-- Locating external tools
+--------------------------------------------------------------------------------
+
+local function file_exists(path)
+  local f = io.open(path, "rb")
+  if f then f:close() return true end
+  return false
+end
+
+-- Directories searched in addition to PATH. Apps started from the macOS
+-- Finder/Dock get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that does
+-- not include Homebrew or MacPorts.
+function M.search_dirs()
+  local dirs, seen = {}, {}
+  local function add(d)
+    if d and d ~= "" and not seen[d] then seen[d] = true dirs[#dirs + 1] = d end
+  end
+  local sep = M.IS_WINDOWS and ";" or ":"
+  for d in (os.getenv("PATH") or ""):gmatch("[^" .. sep .. "]+") do add(d) end
+  if M.IS_WINDOWS then
+    local home = os.getenv("USERPROFILE")
+    if home then add(home .. "\\scoop\\shims") end
+    local scoop = os.getenv("SCOOP")
+    if scoop then add(scoop .. "\\shims") end
+  else
+    local home = os.getenv("HOME")
+    for _, d in ipairs({"/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/bin", "/snap/bin"}) do
+      add(d)
+    end
+    if home then add(home .. "/.local/bin") end
+  end
+  return dirs
+end
+
+local tool_cache = {}
+-- Full path of an external program, or nil when it cannot be found.
+function M.find_tool(name)
+  if tool_cache[name] then return tool_cache[name] end
+  local exts = M.IS_WINDOWS and {".exe", ".cmd", ".bat", ""} or {""}
+  local sep = M.IS_WINDOWS and "\\" or "/"
+  for _, d in ipairs(M.search_dirs()) do
+    for _, ext in ipairs(exts) do
+      local candidate = d:gsub("[/\\]+$", "") .. sep .. name .. ext
+      if file_exists(candidate) then
+        tool_cache[name] = candidate
+        return candidate
+      end
+    end
+  end
+  return nil
+end
+
+-- How to install a missing tool on this platform.
+function M.install_hint(name)
+  local hints
+  if M.IS_WINDOWS then
+    hints = {
+      zenity = "scoop install https://ncruces.github.io/scoop/zenity.json",
+      pdftk = "scoop install pdftk",
+    }
+  elseif M.is_mac() then
+    hints = {zenity = "brew install zenity   (or: brew install ncruces/tap/zenity)", pdftk = "brew install pdftk-java"}
+  else
+    hints = {
+      zenity = "e.g. sudo dnf install zenity / sudo apt install zenity / sudo pacman -S zenity",
+      pdftk = "e.g. sudo dnf install pdftk-java / sudo apt install pdftk-java / sudo pacman -S pdftk",
+    }
+  end
+  return string.format("'%s' was not found.\n\nInstall it with:\n  %s", name, hints[name] or name)
+end
+
+local flavor_cache
+-- "gnome" for GNOME zenity, "ncruces" for the Go port (Windows, optional on
+-- macOS). The port supports a single list column and no --hide-column.
+function M.zenity_flavor()
+  if flavor_cache then return flavor_cache end
+  if M.IS_WINDOWS then
+    flavor_cache = "ncruces"
+  else
+    local out = M.run({"zenity", "--version"}) or ""
+    -- ncruces prints "zenity v0.10.14 darwin/arm64", GNOME prints "4.2.2"
+    flavor_cache = out:match("^zenity ") and "ncruces" or "gnome"
+  end
+  return flavor_cache
+end
+
+--------------------------------------------------------------------------------
 -- Running commands
 --------------------------------------------------------------------------------
 
@@ -155,7 +253,10 @@ end
 -- Run argv and capture stdout. stderr is discarded.
 -- Returns output (string, possibly empty), success (exit code 0).
 function M.run(argv)
-  local command = M.command_line(argv)
+  local resolved = {}
+  for i, a in ipairs(argv) do resolved[i] = a end
+  resolved[1] = M.find_tool(argv[1]) or argv[1]
+  local command = M.command_line(resolved)
   if not M.IS_WINDOWS then
     return M.exec(command .. " 2>/dev/null")
   end
