@@ -241,4 +241,58 @@ return {
     T.eq(calls[1][#calls[1]], "--entry-text=### ")
     T.list_eq(f:names(2), {"Layer 1", "Bookmark::### Sub"})
   end},
+
+  {"manager: demote and promote move the whole subtree", function(T)
+    local f = Fake.new({pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::B"}, {name = "Bookmark::## B.1"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::C"}}},
+    }})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"2", "Demote (one level down, with its sub-bookmarks)"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"L", "Bookmark::A", "Bookmark::## B", "Bookmark::### B.1"})
+    T.list_eq(f:names(2), {"L", "Bookmark::C"}, "following sibling untouched")
+    T.eq(#calls, 3, "list shown again after the change")
+    -- the reopened list shows the indentation
+    T.truthy(table.concat(calls[3], "|"):find("\u{2003}\u{2003}\u{2003}\u{2003}↳ B.1", 1, true))
+
+    T.script_dialogs(platform, {"2", "Promote (one level up, with its sub-bookmarks)"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"L", "Bookmark::A", "Bookmark::B", "Bookmark::## B.1"})
+  end},
+
+  {"manager: actions offered depend on position", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::## A.1"}}}}})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"1", false, "2", false})
+    view_bookmarks()
+    local first = table.concat(calls[2], "|")
+    T.truthy(not first:find("Promote", 1, true) and not first:find("Demote", 1, true), first)
+    local second = table.concat(calls[4], "|")
+    T.truthy(second:find("Promote", 1, true) and not second:find("Demote", 1, true), second)
+  end},
+
+  {"manager: delete only the parent promotes its children", function(T)
+    local f = Fake.new({pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::## A.1"}}},
+      {layers = {{name = "Bookmark::### A.1.1"}, {name = "L"}, {name = "Bookmark::B"}}},
+    }})
+    local platform = T.load_plugin(f)
+    T.script_dialogs(platform, {"1", "Delete", "Delete only this bookmark (its sub-bookmarks move up one level)"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"L", "Bookmark::A.1"})
+    T.list_eq(f:names(2), {"Bookmark::## A.1.1", "L", "Bookmark::B"})
+  end},
+
+  {"manager: delete with sub-bookmarks", function(T)
+    local f = Fake.new({pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::## A.1"}}},
+      {layers = {{name = "Bookmark::### A.1.1"}, {name = "L"}, {name = "Bookmark::B"}}},
+    }})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"1", "Delete", "Delete it with its 2 sub-bookmarks"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"L"})
+    T.list_eq(f:names(2), {"L", "Bookmark::B"})
+  end},
 }

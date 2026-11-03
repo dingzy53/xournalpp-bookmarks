@@ -127,61 +127,121 @@ function search_bookmark(mode)
   app.scrollToPage(nextBookmark)
 end
 
-function view_bookmarks()
-  local structure = app.getDocumentStructure()
-  local numPages = #structure.pages
-  if numPages == 0 then
-    show_msg("Document has no pages.", false)
+local ACTION_JUMP = "Jump To"
+local ACTION_EDIT = "Edit"
+local ACTION_PROMOTE = "Promote (one level up, with its sub-bookmarks)"
+local ACTION_DEMOTE = "Demote (one level down, with its sub-bookmarks)"
+local ACTION_DELETE = "Delete"
+
+-- Change the level of list[i] and its sub-bookmarks by `delta`.
+local function shift_subtree(list, i, delta)
+  for j = i, model.subtree_end(list, i) do
+    local b = list[j]
+    doc.rename_bookmark(b.page, b.layer, b.title, b.eff + delta)
+  end
+end
+
+local function delete_with_choice(list, i)
+  local last = model.subtree_end(list, i)
+  if last == i then
+    doc.delete_bookmark(list[i].page, list[i].layer)
     return
   end
-
-  local bookmarks = model.collect(structure)
-  if #bookmarks == 0 then
-    show_msg("No bookmarks exist in this document.", false)
-    return
+  local n = last - i
+  local choices = {
+    "Delete only this bookmark (its sub-bookmarks move up one level)",
+    string.format("Delete it with its %d sub-bookmark%s", n, n == 1 and "" or "s"),
+  }
+  local c = ui.choose("Delete: " .. model.display_title(list[i].title), "This bookmark has sub-bookmarks.",
+    "Delete", choices)
+  if c == 1 then
+    -- renaming keeps layer indices, so do it before deleting
+    for j = i + 1, last do
+      local b = list[j]
+      doc.rename_bookmark(b.page, b.layer, b.title, b.eff - 1)
+    end
+    doc.delete_bookmark(list[i].page, list[i].layer)
+  elseif c == 2 then
+    local doomed = {}
+    for j = i, last do doomed[#doomed + 1] = list[j] end
+    doc.delete_bookmarks(doomed)
   end
-  if not need("zenity") then return end
+end
 
-  -- 1. Get the selected bookmark
-  local rows = {}
-  for i, b in ipairs(bookmarks) do
-    rows[i] = {"Page " .. b.page, model.display_title(b.title)}
+local function edit_bookmark(selected, numPages)
+  local newPage, newText = edit_bookmark_zenity("Edit Bookmark", selected.page,
+    model.format_title(selected.eff, selected.title), numPages)
+  if newPage == nil then return end
+  local newLevel, newName = parse_input(newText)
+  if selected.page == newPage then
+    doc.rename_bookmark(selected.page, selected.layer, newName, newLevel)
+  else
+    doc.delete_bookmark(selected.page, selected.layer)
+    doc.add_bookmark(newPage, newName, newLevel)
+    app.setCurrentPage(newPage)
+    app.scrollToPage(newPage)
   end
-  local idx = ui.choose_rows("Bookmark Manager", "Select a bookmark to manage:", {"Page", "Name"}, rows,
-    {width = 500, height = 400})
-  if not idx or not bookmarks[idx] then return end -- Cancelled
-  local oldPage, oldLayerID = bookmarks[idx].page, bookmarks[idx].layer
+end
 
-  local selected = bookmarks[idx]
-  local oldName = selected.title
+-- Ask what to do with list[i]. Returns true when the manager should close.
+local function manage_bookmark(list, i, numPages)
+  local b = list[i]
+  local actions = {ACTION_JUMP, ACTION_EDIT}
+  if model.can_promote(list, i) then actions[#actions + 1] = ACTION_PROMOTE end
+  if model.can_demote(list, i) then actions[#actions + 1] = ACTION_DEMOTE end
+  actions[#actions + 1] = ACTION_DELETE
 
-  -- 2. Ask what to do with it
-  local actions = {"Jump To", "Edit", "Delete"}
   -- The name goes into the window title: zenity parses --text as Pango
   -- markup (GNOME) or shows it raw (ncruces), so no escaping fits both.
-  local actionIdx = ui.choose("Bookmark: " .. model.display_title(oldName), "Choose an action:", "Action", actions)
-  if not actionIdx then return end -- Cancelled
-  local action = actions[actionIdx]
+  local idx = ui.choose("Bookmark: " .. model.display_title(b.title), "Choose an action:", "Action", actions,
+    {height = 300})
+  local action = idx and actions[idx]
+  if not action then return false end -- back to the list
 
-  if action == "Jump To" then
-    app.setCurrentPage(oldPage)
-    app.scrollToPage(oldPage)
-  elseif action == "Delete" then
-    doc.delete_bookmark(oldPage, oldLayerID)
-  elseif action == "Edit" then
-    local newPage, newText = edit_bookmark_zenity("Edit Bookmark", oldPage,
-      model.format_title(selected.eff, selected.title), numPages)
-    if newPage ~= nil then
-      local newLevel, newName = parse_input(newText)
-      if oldPage == newPage then
-        doc.rename_bookmark(oldPage, oldLayerID, newName, newLevel)
-      else
-        doc.delete_bookmark(oldPage, oldLayerID)
-        doc.add_bookmark(newPage, newName, newLevel)
-        app.setCurrentPage(newPage)
-        app.scrollToPage(newPage)
-      end
+  if action == ACTION_JUMP then
+    app.setCurrentPage(b.page)
+    app.scrollToPage(b.page)
+    return true
+  elseif action == ACTION_EDIT then
+    edit_bookmark(b, numPages)
+  elseif action == ACTION_PROMOTE then
+    shift_subtree(list, i, -1)
+  elseif action == ACTION_DEMOTE then
+    shift_subtree(list, i, 1)
+  elseif action == ACTION_DELETE then
+    delete_with_choice(list, i)
+  end
+  return false
+end
+
+-- Bookmark manager: the outline as an indented list. After each change the
+-- list is shown again, until it is closed or "Jump To" is chosen.
+function view_bookmarks()
+  local first = true
+  while true do
+    local structure = app.getDocumentStructure()
+    local numPages = #structure.pages
+    if numPages == 0 then
+      show_msg("Document has no pages.", false)
+      return
     end
+    local bookmarks = model.collect(structure)
+    if #bookmarks == 0 then
+      if first then show_msg("No bookmarks exist in this document.", false) end
+      return
+    end
+    if first and not need("zenity") then return end
+    first = false
+
+    local rows = {}
+    for i, b in ipairs(bookmarks) do
+      rows[i] = {"Page " .. b.page, model.outline_label(b)}
+    end
+    local idx = ui.choose_rows("Bookmark Manager", "Select a bookmark to manage:", {"Page", "Bookmark"}, rows,
+      {width = 600, height = 500})
+    if not idx or not bookmarks[idx] then return end -- Closed
+
+    if manage_bookmark(bookmarks, idx, numPages) then return end
   end
 end
 
