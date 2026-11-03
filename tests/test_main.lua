@@ -232,4 +232,13 @@ return {
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1", "Bookmark::## B renamed"}, "moved with its level")
   end},
+
+  {"new sub-bookmark is one level below the previous bookmark", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::Ch"}, {name = "Bookmark::## Sec"}}}, {}}, currentPage = 2})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"### Sub"})
+    dialog_new_sub_bookmark()
+    T.eq(calls[1][#calls[1]], "--entry-text=### ")
+    T.list_eq(f:names(2), {"Layer 1", "Bookmark::### Sub"})
+  end},
 }

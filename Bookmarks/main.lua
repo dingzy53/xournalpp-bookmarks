@@ -44,6 +44,7 @@ end
 function initUi()
   app.registerUi({menu="Previous Bookmark", toolbarId="CUSTOM_PREVIOUS_BOOKMARK", callback="search_bookmark", mode=-1, iconName="go-previous"})
   app.registerUi({menu="New Bookmark", toolbarId="CUSTOM_NEW_BOOKMARK", callback="dialog_new_bookmark", iconName="bookmark-new-symbolic"})
+  app.registerUi({menu="New Sub-Bookmark", toolbarId="CUSTOM_NEW_SUB_BOOKMARK", callback="dialog_new_sub_bookmark", iconName="format-indent-more-symbolic"})
   app.registerUi({menu="New Bookmark (No dialog)", toolbarId="CUSTOM_NEW_BOOKMARK_NO_DIALOG", callback="new_bookmark", iconName="bookmark-new-symbolic"})
   app.registerUi({menu="Next Bookmark", toolbarId="CUSTOM_NEXT_BOOKMARK", callback="search_bookmark", mode=1, iconName="go-next"})
   app.registerUi({menu="View Bookmarks", toolbarId="CUSTOM_VIEW_BOOKMARKS", callback="view_bookmarks", iconName="user-bookmarks-symbolic"})
@@ -88,6 +89,13 @@ end
 -- level prefix, so pressing Enter after typing a name creates a sibling.
 function dialog_new_bookmark()
   dialog_add(sibling_level(), "New Bookmark")
+end
+
+-- "New Sub-Bookmark": one level below the bookmark it follows.
+function dialog_new_sub_bookmark()
+  local structure = app.getDocumentStructure()
+  local prev = model.previous_level(model.collect(structure), structure.currentPage)
+  dialog_add(model.clamp_level((prev or 0) + 1), "New Sub-Bookmark")
 end
 
 -- mode = -1 for searching backwards, or 1 for searching forwards
