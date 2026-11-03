@@ -157,4 +157,31 @@ return {
     T.eq(n, 2)
     T.eq(stripped, "InfoBegin\nInfoKey: Title\nInfoValue: X\nPageMediaBegin\nPageMediaNumber: 1\n")
   end},
+
+  {"export leaves no temporary files and handles non-ASCII destinations", function(T)
+    if not have_pdftk() then return end
+    local platform = require("bm_platform")
+    local before = temp_snapshot(platform)
+    local f, p, src, out = setup(T, {pages = {
+      {layers = {{name = "Layer 1"}, {name = "Bookmark::A"}}}, {}, {},
+    }})
+    local dest = platform.temp_dir() .. "/bm test ü 日本 's.pdf"
+    f.saveAsResult = dest
+    before[src:match("[^/]+$")] = true
+    export_with_bookmarks()
+    T.list_eq(outline_of(dest), {"A@1:1"})
+    T.list_eq(leftover_temp_files(p, before), {}, "leftover temp files")
+    os.remove(dest)
+    os.remove(src)
+  end},
+
+  {"export reports a failed Xournal++ export", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "Bookmark::A"}}}}, saveAsResult = "/nonexistent/x.pdf"})
+    local p = T.load_plugin(f)
+    p.execute = function() return true end -- pretend pdftk exists
+    f.on_export = function() end           -- writes nothing
+    export_with_bookmarks()
+    T.eq(f.messages[#f.messages].error, true)
+    T.truthy(f.messages[#f.messages].msg:find("could not export"), f.messages[#f.messages].msg)
+  end},
 }

@@ -239,17 +239,14 @@ function export_with_bookmarks()
   local path = app.saveAs(defaultName)
   if not path or path == "" then return end -- Cancelled
 
-  -- Determine safe temporary files in system temp directory
-  local tempDir = IS_WINDOWS and (os.getenv("TEMP") or os.getenv("TMP") or "C:\\Windows\\Temp") or (os.getenv("TMPDIR") or "/tmp")
-  local tempBase = os.tmpname()
-  if IS_WINDOWS then
-    local fname = tempBase:match("[^\\]+$") or tempBase:sub(2)
-    tempBase = tempDir .. "\\" .. fname
-  end
-  local tempPdf = tempBase .. "_1337__.pdf"
-
-  -- Export base PDF from Xournal++
+  -- Export the base PDF from Xournal++ into a temporary file
+  local tempPdf = platform.temp_path(".pdf")
   app.export({outputFile = tempPdf})
+  if not platform.file_size(tempPdf) or platform.file_size(tempPdf) == 0 then
+    os.remove(tempPdf)
+    show_msg("Xournal++ could not export the document to PDF.", true)
+    return
+  end
 
   local dump, err = pdf.read_dump(tempPdf)
   if not dump then
@@ -276,9 +273,17 @@ function export_with_bookmarks()
     keep_existing = true
   end
 
+  -- pdftk writes to a temporary file that is then moved into place:
+  -- GLib copes with non-ASCII paths on Windows and with paths that only
+  -- exist inside the Flatpak sandbox, which pdftk might not.
+  local tempOut = platform.temp_path(".pdf")
   local ok
-  ok, err = pdf.write_outline(tempPdf, path, dump, bookmarks, {keep_existing = keep_existing})
+  ok, err = pdf.write_outline(tempPdf, tempOut, dump, bookmarks, {keep_existing = keep_existing})
   os.remove(tempPdf)
+  if ok then
+    ok, err = platform.move_file(tempOut, path)
+  end
+  os.remove(tempOut)
 
   if not ok then
     show_msg(err, true)

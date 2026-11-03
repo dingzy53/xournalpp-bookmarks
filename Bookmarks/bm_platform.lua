@@ -69,6 +69,7 @@ function M.temp_dir()
   return os.getenv("TMPDIR") or "/tmp"
 end
 
+math.randomseed(os.time())
 local counter = 0
 -- A fresh path in the temp dir. Only ASCII is added to the directory name.
 function M.temp_path(suffix)
@@ -78,6 +79,44 @@ function M.temp_path(suffix)
   local name = string.format("xopp_bookmarks_%d_%d_%d%s", os.time(), math.random(100000, 999999), counter,
     suffix or "")
   return dir .. sep .. name
+end
+
+function M.file_size(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local size = f:seek("end")
+  f:close()
+  return size
+end
+
+local function copy_file(from, to)
+  local i = io.open(from, "rb")
+  if not i then return false end
+  local o = io.open(to, "wb")
+  if not o then i:close() return false end
+  while true do
+    local chunk = i:read(65536)
+    if not chunk then break end
+    o:write(chunk)
+  end
+  i:close()
+  return o:close() and true or false
+end
+
+-- Move a file to its final destination (overwriting it). Prefers
+-- app.glib_rename, which takes UTF-8 paths and works across file systems.
+-- Returns true, or false and an error message.
+function M.move_file(from, to)
+  if app and app.glib_rename then
+    local ok, res = pcall(app.glib_rename, from, to)
+    if ok and res then return true end
+  end
+  if os.rename(from, to) then return true end
+  if copy_file(from, to) then
+    os.remove(from)
+    return true
+  end
+  return false, "Could not write the exported PDF to:\n" .. tostring(to)
 end
 
 --------------------------------------------------------------------------------
