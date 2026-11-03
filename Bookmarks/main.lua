@@ -2,21 +2,15 @@ local platform = require("bm_platform")
 local model = require("bm_model")
 local ui = require("bm_ui")
 local pdf = require("bm_pdf")
+local doc = require("bm_doc")
 
 local IS_WINDOWS = platform.IS_WINDOWS
 
 -- Default export path suggestion
 local DEFAULT_EXPORT_PATH = IS_WINDOWS and ((os.getenv("TEMP") or "C:\\Temp") .. "\\temp") or "/tmp/temp"
 
--- Wrapper for message dialogs (compatible across Xournal++ versions and platforms)
 local function show_msg(msg, is_error)
-  if app.openDialog then
-    app.openDialog(msg, {"OK"}, "", is_error or false)
-  elseif app.msgbox then
-    app.msgbox(msg, {[1] = "OK"})
-  else
-    platform.execute({"zenity", is_error and "--error" or "--info", "--text=" .. msg})
-  end
+  doc.message(msg, is_error)
 end
 
 -- Parse the "page_layer" ID returned by the bookmark list
@@ -37,7 +31,7 @@ local function delete_layer(page, layerID)
 
   app.setCurrentPage(page)
   app.setCurrentLayer(layerID)
-  app.layerAction("ACTION_DELETE_LAYER")
+  doc.delete_current_layer()
 
   -- Restore active layer safely:
   -- If deleted layer was active or above, shift active index down
@@ -92,7 +86,7 @@ function new_bookmark(name)
   local currentPage = structure.currentPage
   local currentLayerID = structure.pages[currentPage].currentLayer
 
-  app.layerAction("ACTION_NEW_LAYER")
+  doc.new_layer_above_current()
   if type(name) == "string" and name ~= "" then
     -- Strip any newlines that would break pdftk syntax
     app.setCurrentLayerName(model.layer_name((name:gsub("[\r\n]", " "))))
@@ -236,8 +230,13 @@ function export_with_bookmarks()
   end
   defaultName = defaultName .. "_export.pdf"
 
-  local path = app.saveAs(defaultName)
+  doc.save_dialog("bookmarks_export_to", defaultName)
+end
+
+-- Second half of the export, called with the path chosen in the save dialog.
+function bookmarks_export_to(path)
   if not path or path == "" then return end -- Cancelled
+  local structure = app.getDocumentStructure()
 
   -- Export the base PDF from Xournal++ into a temporary file
   local tempPdf = platform.temp_path(".pdf")

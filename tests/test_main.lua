@@ -67,4 +67,28 @@ return {
     T.list_eq(f:names(2), {"Layer 1"})
     T.list_eq(f:names(3), {"Layer 1", "Bookmark::Moved"})
   end},
+
+  {"uses non-deprecated actions on Xournal++ 1.3", function(T)
+    local f = doc()
+    local platform = T.load_plugin(f)
+    new_bookmark("A")
+    T.script_dialogs(platform, {"2_2", "Delete"})
+    view_bookmarks()
+    for _, l in ipairs(f.log) do T.truthy(not l:find("^layerAction"), "deprecated call: " .. l) end
+    T.truthy(table.concat(f.log, ","):find("activateAction:layer-new-above-current", 1, true))
+    T.truthy(table.concat(f.log, ","):find("activateAction:layer-delete", 1, true))
+  end},
+
+  {"falls back to the 1.2 API", function(T)
+    local f = Fake.new({api_version = "1.2", pages = {{layers = {{name = "Layer 1"}}}}, saveAsResult = ""})
+    local platform = T.load_plugin(f)
+    T.eq(app.activateAction, nil)
+    new_bookmark("A")
+    T.list_eq(f:names(1), {"Layer 1", "Bookmark::A"})
+    search_bookmark(1)
+    T.eq(#f.messages, 0)
+    platform.execute = function() return true end
+    export_with_bookmarks() -- cancelled save dialog (saveAs returns "")
+    T.eq(f.suggested, "/tmp/temp_export.pdf")
+  end},
 }
