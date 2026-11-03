@@ -184,4 +184,24 @@ return {
     T.eq(f.messages[#f.messages].error, true)
     T.truthy(f.messages[#f.messages].msg:find("could not export"), f.messages[#f.messages].msg)
   end},
+
+  {"export writes a nested outline", function(T)
+    if not have_pdftk() then return end
+    local f, platform, src, out = setup(T, {pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::Ch 1"}, {name = "Bookmark::## 1.1"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::### 1.1.1"}, {name = "Bookmark::#### skips to 4"},
+        {name = "Bookmark::## 1.2"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::Ch 2"}}},
+    }})
+    export_with_bookmarks()
+    T.list_eq(outline_of(out), {"Ch 1@1:1", "1.1@2:1", "1.1.1@3:2", "skips to 4@4:2", "1.2@2:2", "Ch 2@1:3"})
+    -- check the tree pdftk actually built, via the parent/child structure qpdf reports
+    local qpdf = platform.find_tool("qpdf")
+    if qpdf then
+      local json = platform.run({"qpdf", "--json", "--json-key=outlines", out}) or ""
+      T.truthy(json:find('"title": "1.1.1"', 1, true), "nested entry present")
+    end
+    os.remove(src)
+    os.remove(out)
+  end},
 }

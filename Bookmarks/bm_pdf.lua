@@ -8,7 +8,7 @@ function M.clean_title(title)
   return (tostring(title or ""):gsub("[%z\1-\31\127]", " "):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
--- pdftk "BookmarkBegin" records for a list of {page, title[, level]}.
+-- pdftk "BookmarkBegin" records for a list of {page, title[, eff|level]}.
 function M.bookmark_records(bookmarks)
   local out = {}
   for _, b in ipairs(bookmarks) do
@@ -16,7 +16,9 @@ function M.bookmark_records(bookmarks)
     if title == "" then title = "Page " .. b.page end
     out[#out + 1] = "BookmarkBegin\n"
     out[#out + 1] = "BookmarkTitle: " .. title .. "\n"
-    out[#out + 1] = "BookmarkLevel: " .. (b.level or 1) .. "\n"
+    -- eff: normalised level, so each entry is at most one level deeper than
+    -- the previous one (pdftk builds a wrong tree otherwise)
+    out[#out + 1] = "BookmarkLevel: " .. (b.eff or b.level or 1) .. "\n"
     out[#out + 1] = "BookmarkPageNumber: " .. b.page .. "\n"
   end
   return table.concat(out)
