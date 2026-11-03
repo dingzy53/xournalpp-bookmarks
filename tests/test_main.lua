@@ -89,7 +89,7 @@ return {
     T.eq(#f.messages, 0)
     platform.find_tool = function(n) return "/usr/bin/" .. n end
     export_with_bookmarks() -- cancelled save dialog (saveAs returns "")
-    T.eq(f.suggested, "/tmp/temp_export.pdf")
+    T.eq(f.suggested, os.getenv("HOME") .. "/bookmarks_export.pdf")
   end},
 
   {"new bookmarks are appended on top so same-page order is creation order", function(T)
@@ -191,5 +191,13 @@ return {
     T.eq(#f.messages, 1)
     T.truthy(f.messages[1].msg:find("zenity", 1, true))
     T.eq(f.messages[1].error, true)
+  end},
+
+  {"default export path", function(T)
+    local platform = require("bm_platform")
+    T.eq(platform.default_export_path("/home/u/notes.xopp", ""), "/home/u/notes_export.pdf")
+    T.eq(platform.default_export_path("/home/u/my.dir/notes", ""), "/home/u/my.dir/notes_export.pdf")
+    T.eq(platform.default_export_path("", "/home/u/paper.pdf"), "/home/u/paper_annotated.pdf")
+    T.eq(platform.default_export_path("", ""), os.getenv("HOME") .. "/bookmarks_export.pdf")
   end},
 }

@@ -4,10 +4,6 @@ local ui = require("bm_ui")
 local pdf = require("bm_pdf")
 local doc = require("bm_doc")
 
-local IS_WINDOWS = platform.IS_WINDOWS
-
--- Default export path suggestion
-local DEFAULT_EXPORT_PATH = IS_WINDOWS and ((os.getenv("TEMP") or "C:\\Temp") .. "\\temp") or "/tmp/temp"
 
 local function show_msg(msg, is_error)
   doc.message(msg, is_error)
@@ -163,16 +159,7 @@ function export_with_bookmarks()
 
   local structure = app.getDocumentStructure()
 
-  local defaultName = DEFAULT_EXPORT_PATH
-  local xopp_name = structure.xoppFilename
-  if xopp_name ~= nil and xopp_name ~= "" then
-    local base = xopp_name:match("(.+)%..+$")
-    if base and base ~= "" then
-      defaultName = base
-    end
-  end
-  defaultName = defaultName .. "_export.pdf"
-
+  local defaultName = platform.default_export_path(structure.xoppFilename, structure.pdfBackgroundFilename)
   doc.save_dialog("bookmarks_export_to", defaultName)
 end
 

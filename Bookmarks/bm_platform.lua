@@ -125,6 +125,22 @@ function M.temp_path(suffix)
   return dir .. sep .. name
 end
 
+local function strip_extension(path)
+  return path:match("^(.*)%.[^./\\]*$") or path
+end
+
+-- Suggested file name for the export: next to the .xopp file, else next to
+-- the annotated PDF, else in the home folder.
+function M.default_export_path(xopp, pdf)
+  if xopp and xopp ~= "" then return strip_extension(xopp) .. "_export.pdf" end
+  if pdf and pdf ~= "" then return strip_extension(pdf) .. "_annotated.pdf" end
+  local home = M.IS_WINDOWS and os.getenv("USERPROFILE") or os.getenv("HOME")
+  if home and home ~= "" then
+    return home:gsub("[/\\]+$", "") .. (M.IS_WINDOWS and "\\" or "/") .. "bookmarks_export.pdf"
+  end
+  return "bookmarks_export.pdf"
+end
+
 function M.file_size(path)
   local f = io.open(path, "rb")
   if not f then return nil end
