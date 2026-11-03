@@ -47,6 +47,8 @@ function initUi()
   app.registerUi({menu="New Sub-Bookmark", toolbarId="CUSTOM_NEW_SUB_BOOKMARK", callback="dialog_new_sub_bookmark", iconName="format-indent-more-symbolic"})
   app.registerUi({menu="New Bookmark (No dialog)", toolbarId="CUSTOM_NEW_BOOKMARK_NO_DIALOG", callback="new_bookmark", iconName="bookmark-new-symbolic"})
   app.registerUi({menu="Next Bookmark", toolbarId="CUSTOM_NEXT_BOOKMARK", callback="search_bookmark", mode=1, iconName="go-next"})
+  app.registerUi({menu="Previous Top-Level Bookmark", toolbarId="CUSTOM_PREVIOUS_TOP_BOOKMARK", callback="search_bookmark", mode=-2, iconName="go-first"})
+  app.registerUi({menu="Next Top-Level Bookmark", toolbarId="CUSTOM_NEXT_TOP_BOOKMARK", callback="search_bookmark", mode=2, iconName="go-last"})
   app.registerUi({menu="View Bookmarks", toolbarId="CUSTOM_VIEW_BOOKMARKS", callback="view_bookmarks", iconName="user-bookmarks-symbolic"})
   app.registerUi({menu="Export to PDF with Bookmarks", toolbarId="CUSTOM_EXPORT_WITH_BOOKMARKS", callback="export_with_bookmarks", iconName="xopp-document-export-pdf"})
 end
@@ -98,28 +100,36 @@ function dialog_new_sub_bookmark()
   dialog_add(model.clamp_level((prev or 0) + 1), "New Sub-Bookmark")
 end
 
--- mode = -1 for searching backwards, or 1 for searching forwards
+-- mode = -1 / 1: previous / next page with a bookmark.
+-- mode = -2 / 2: previous / next page with a top-level (level 1) bookmark.
 function search_bookmark(mode)
   local structure = app.getDocumentStructure()
   local numPages = #structure.pages
   if numPages == 0 then return end
+  mode = mode or 1
+  local step = mode < 0 and -1 or 1
+  local top_only = math.abs(mode) == 2
+
+  local has_bookmark = {}
+  for _, b in ipairs(model.collect(structure)) do
+    if not top_only or b.eff == 1 then has_bookmark[b.page] = true end
+  end
 
   local currentPage = structure.currentPage
   local page = currentPage
   local nextBookmark = nil
-
   repeat
-    page = page + mode
+    page = page + step
     if page > numPages then page = 1 end
     if page < 1 then page = numPages end
-    if #model.collect_page(structure, page) > 0 then
+    if has_bookmark[page] then
       nextBookmark = page
       break
     end
   until page == currentPage
 
   if nextBookmark == nil then
-    show_msg("No bookmark found.", false)
+    show_msg(top_only and "No top-level bookmark found." or "No bookmark found.", false)
     return
   end
 

@@ -295,4 +295,22 @@ return {
     T.list_eq(f:names(1), {"L"})
     T.list_eq(f:names(2), {"L", "Bookmark::B"})
   end},
+
+  {"top-level navigation skips sub-bookmarks", function(T)
+    local f = Fake.new({pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::Ch1"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::## 1.1"}}},
+      {layers = {{name = "L"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::Ch2"}}},
+    }})
+    T.load_plugin(f)
+    search_bookmark(2)
+    T.eq(f.currentPage, 4)
+    search_bookmark(2)
+    T.eq(f.currentPage, 1, "wraps around")
+    search_bookmark(1)
+    T.eq(f.currentPage, 2, "plain next still stops at sub-bookmarks")
+    search_bookmark(-2)
+    T.eq(f.currentPage, 1)
+  end},
 }
