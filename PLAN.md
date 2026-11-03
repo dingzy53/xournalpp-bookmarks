@@ -1,12 +1,24 @@
 # PLAN — Review fixes & hierarchical bookmarks
 
-Status: Part 1 implemented (branch `fix/review-and-cross-platform`), Part 2 not started · Date: 2026-11-03 · Target: plugin v0.3
+Status: Part 1 and Part 2 implemented (v0.3) · Date: 2026-11-03 · Target: plugin v0.3
 
 > **Progress.** F1–F13 are done, plus macOS and Flatpak support, with one commit each. Two changes from the original plan:
 > - F1 uses a UTF-8 batch file with escaping plus pagination, because the ncruces Windows zenity only takes list rows as arguments, not on stdin.
 > - F8 moves names into the dialog title, because GNOME zenity parses `--text` as markup while ncruces shows it raw.
 >
-> The module layout from §2.4 exists as `bm_platform`, `bm_ui`, `bm_doc`, `bm_model`, `bm_pdf`, with tests in `tests/`. F14 (README) is done. F15 (accelerators) is still open.
+> The module layout from §2.4 exists as `bm_platform`, `bm_ui`, `bm_doc`, `bm_model`, `bm_pdf`, with tests in `tests/`. F14 (README) is done.
+>
+> F15 (default accelerators) was not done on purpose. Plugin accelerators can clash with Xournal++'s built-in shortcuts, and users can't rebind them. All actions are available as toolbar buttons instead.
+>
+> **Part 2** (milestones M2–M4) is done:
+> - storage format (§2.2), normalisation, subtrees, nested export
+> - prefilled level dialog, *New Sub-Bookmark*, indented manager with promote/demote, delete choices and returning to the list after each change
+> - top-level navigation and outline import
+>
+> Not done:
+> - *Move subtree to page* (optional in §2.5 C)
+> - the toolbar breadcrumb placeholder (§2.5 D), because the plugin API has no page-change event
+> - `zenity --forms` (§2.5 A), because a single entry with the `##` prefix works with every zenity build
 
 This plan has two parts:
 

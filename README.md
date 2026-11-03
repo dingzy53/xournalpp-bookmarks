@@ -64,20 +64,45 @@ scoop install https://ncruces.github.io/scoop/zenity.json pdftk
 
 ## Features
 
-- **Add bookmarks** with a name dialog, or silently (no dialog)
-- **Navigate** between bookmarks (previous/next)
-- **View & manage** all bookmarks in a list (jump to, edit, move to another page, delete)
-- **Export to PDF** with an embedded outline (requires pdftk). Titles are written as UTF-8, so any language, emoji and characters like `&` work. If the document's background PDF already has an outline, you can choose to replace it or keep it.
+- **Add bookmarks** with a name dialog, silently (no dialog), or as a **sub-bookmark** of the previous one
+- **Nested bookmarks** (chapters > sections > subsections, up to 9 levels)
+- **Navigate** between bookmarks (previous/next), or between **top-level** bookmarks only (chapter to chapter)
+- **Bookmark manager** with the outline shown indented: jump to, edit, move to another page, promote/demote (with sub-bookmarks), delete (only the bookmark, or with its sub-bookmarks)
+- **Import** the background PDF's table of contents as bookmarks (requires pdftk)
+- **Export to PDF** with an embedded, nested outline (requires pdftk). Titles are written as UTF-8, so any language, emoji and characters like `&` work. If the background PDF already has an outline, you can replace it or keep it.
+
+### Levels
+
+Type the level in front of the name, as in Markdown headings:
+
+| You type | Result |
+|---|---|
+| `Introduction` | level 1 |
+| `## Background` | level 2 |
+| `### Prior work` | level 3 |
+| `# ## Not a heading` | level 1, titled `## Not a heading` |
+
+*New Bookmark* is pre-filled with the previous bookmark's prefix, so typing a name and pressing Enter creates a bookmark at the same level. *New Sub-Bookmark* is pre-filled one level deeper.
+
+A bookmark can be at most one level deeper than the bookmark before it. If a level skips (for example after a delete), the manager shows `⚠` and the export uses the nearest valid level.
+
+### Toolbar buttons
+
+All actions are in the *Plugin* menu. They can also be added to a toolbar (*View > Toolbars > Customize*) as `Plugin::CUSTOM_PREVIOUS_BOOKMARK`, `CUSTOM_NEXT_BOOKMARK`, `CUSTOM_PREVIOUS_TOP_BOOKMARK`, `CUSTOM_NEXT_TOP_BOOKMARK`, `CUSTOM_NEW_BOOKMARK`, `CUSTOM_NEW_SUB_BOOKMARK`, `CUSTOM_NEW_BOOKMARK_NO_DIALOG`, `CUSTOM_VIEW_BOOKMARKS`, `CUSTOM_IMPORT_PDF_OUTLINE` and `CUSTOM_EXPORT_WITH_BOOKMARKS`.
 
 ## How bookmarks are stored
 
-Each bookmark is a hidden layer named `Bookmark::<title>` on its page, so bookmarks are saved inside the `.xopp` file and move with their page. You can see and rename them in the Layer sidebar. Bookmarks on the same page are ordered by layer, and new ones are added on top. To reorder bookmarks on one page, move their layers.
+Each bookmark is a hidden layer on its page, named `Bookmark::<title>`, or `Bookmark::## <title>` for level 2, and so on. Bookmarks are saved inside the `.xopp` file and move with their page. You can see and rename them in the Layer sidebar. The outline order is page order, then layer order within a page, and new bookmarks are added on top. To reorder bookmarks on one page, move their layers.
+
+Older versions of this plugin (and the original upstream plugin) still see nested bookmarks. They show them flat, with the `##` prefix as part of the title.
 
 ## Known behaviors
 
 - Xournal++ may briefly show "Not Responding" while a Zenity dialog is open. The plugin API only offers blocking calls to external programs.
 - On Windows, a console window may flash briefly when a dialog opens.
 - On Windows, double quotes in bookmark names are shown as `''` in dialogs, because `cmd.exe` cannot pass them safely. The stored name stays unchanged unless you edit it.
+- Each layer change (for example promoting a bookmark with 3 sub-bookmarks) is a separate undo step.
+- Duplicating a page also duplicates its bookmarks.
 
 ## Development
 
@@ -89,7 +114,7 @@ The plugin is split into small modules:
 | `bm_platform.lua` | OS, Flatpak and tool detection, safe command execution |
 | `bm_ui.lua` | Zenity dialogs |
 | `bm_doc.lua` | Layer operations and Xournal++ API compatibility |
-| `bm_model.lua` | Bookmark parsing and collection |
+| `bm_model.lua` | Bookmark names, levels and the outline tree |
 | `bm_pdf.lua` | pdftk outline handling |
 
 Run the tests with Lua 5.3+ from the repository root:
