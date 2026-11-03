@@ -351,7 +351,10 @@ function M.run(argv)
   if not f then return nil, false end
   f:write(M.windows_script(command .. " 2>NUL"))
   f:close()
-  local out, ok = M.exec('"' .. script .. '"')
+  -- io.popen runs `cmd.exe /c <command>`. With more than two quotes cmd.exe
+  -- always strips just the outermost pair, so ""<path>"" keeps the path
+  -- quoted even when it contains spaces, ( ) or &.
+  local out, ok = M.exec('""' .. script .. '""')
   os.remove(script)
   return out, ok
 end

@@ -184,4 +184,30 @@ return {
     _G.app = saved_app
     package.loaded.bm_platform = nil
   end},
+
+  {"Windows runs the batch file with cmd-safe quoting", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    platform.IS_WINDOWS = true
+    platform.find_tool = function(n) return "C:\\scoop\\shims\\" .. n .. ".exe" end
+    platform.locate = function(n) return {path = platform.find_tool(n), host = false} end
+    local tmp = os.tmpname()
+    os.remove(tmp)
+    platform.temp_path = function(suffix) return tmp .. suffix end
+    local script_text, popen_cmd
+    platform.exec = function(cmd)
+      popen_cmd = cmd
+      local path = cmd:match('^""(.*)""$')
+      local f = io.open(path, "rb")
+      script_text = f:read("*a")
+      f:close()
+      return "picked\r\n", true
+    end
+    T.eq(platform.run_zenity({"zenity", "--entry", "--entry-text=a\" & calc & \"%x%"}), "picked")
+    T.truthy(popen_cmd:match('^"".*%.cmd""$'), popen_cmd)
+    T.truthy(script_text:find('"C:\\scoop\\shims\\zenity.exe" "--entry" "--entry-text=a\'\' & calc & \'\'%%x%%" 2>NUL', 1, true),
+      script_text)
+    T.eq(io.open(popen_cmd:match('^""(.*)""$'), "rb"), nil, "batch file removed")
+    package.loaded.bm_platform = nil
+  end},
 }
