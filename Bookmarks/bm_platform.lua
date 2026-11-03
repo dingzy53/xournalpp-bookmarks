@@ -8,6 +8,28 @@ local M = {}
 -- "\\" = Windows, "/" = Linux/macOS
 M.IS_WINDOWS = (package.config:sub(1, 1) == "\\")
 
+local function file_exists(path)
+  local f = io.open(path, "rb")
+  if f then f:close() return true end
+  return false
+end
+
+-- Running inside the Flatpak sandbox (e.g. Xournal++ from Flathub)?
+M.IS_FLATPAK = not M.IS_WINDOWS and (os.getenv("FLATPAK_ID") ~= nil or file_exists("/.flatpak-info"))
+
+-- Flatpak: may the sandbox run host commands through `flatpak-spawn --host`?
+-- Requires access to org.freedesktop.Flatpak on the session bus, which
+-- Xournal++'s Flathub package does not grant by default.
+function M.flatpak_host_allowed()
+  local f = io.open("/.flatpak-info", "r")
+  if not f then return false end
+  local info = f:read("*a")
+  f:close()
+  local policy = info:match("%[Session Bus Policy%]([^%[]*)") or ""
+  return policy:match("org%.freedesktop%.Flatpak=talk") ~= nil
+    or policy:match("org%.freedesktop%.Flatpak=own") ~= nil
+end
+
 local is_mac_cache
 -- macOS is a POSIX system; tell it apart from Linux with uname.
 function M.is_mac()
@@ -77,6 +99,17 @@ function M.temp_dir()
   if M.IS_WINDOWS then
     return os.getenv("TEMP") or os.getenv("TMP") or "C:\\Windows\\Temp"
   end
+  if M.IS_FLATPAK then
+    -- The sandbox's /tmp is private, but host tools (pdftk) must read and
+    -- write our temp files. ~/.var/app/<id>/cache has the same path on the host.
+    local cache = os.getenv("XDG_CACHE_HOME")
+    if cache and cache ~= "" then return cache end
+    if app and app.getFolder then
+      local ok, dir = pcall(app.getFolder, "state")
+      if ok and dir then return dir end
+    end
+    return os.getenv("HOME") or "/tmp"
+  end
   return os.getenv("TMPDIR") or "/tmp"
 end
 
@@ -134,12 +167,6 @@ end
 -- Locating external tools
 --------------------------------------------------------------------------------
 
-local function file_exists(path)
-  local f = io.open(path, "rb")
-  if f then f:close() return true end
-  return false
-end
-
 -- Directories searched in addition to PATH. Apps started from the macOS
 -- Finder/Dock get a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin) that does
 -- not include Homebrew or MacPorts.
@@ -166,21 +193,50 @@ function M.search_dirs()
 end
 
 local tool_cache = {}
--- Full path of an external program, or nil when it cannot be found.
-function M.find_tool(name)
-  if tool_cache[name] then return tool_cache[name] end
+
+-- Look for `name` in this environment's directories (no host lookup).
+local function find_local(name)
   local exts = M.IS_WINDOWS and {".exe", ".cmd", ".bat", ""} or {""}
   local sep = M.IS_WINDOWS and "\\" or "/"
   for _, d in ipairs(M.search_dirs()) do
     for _, ext in ipairs(exts) do
       local candidate = d:gsub("[/\\]+$", "") .. sep .. name .. ext
-      if file_exists(candidate) then
-        tool_cache[name] = candidate
-        return candidate
-      end
+      if file_exists(candidate) then return candidate end
     end
   end
   return nil
+end
+
+-- Flatpak: path of `name` on the host, using the host's own PATH.
+local function find_host(name)
+  if not M.flatpak_host_allowed() then return nil end
+  local out, ok = M.exec(M.command_line({"flatpak-spawn", "--host", "sh", "-c", 'command -v "$1"', "sh", name})
+    .. " 2>/dev/null")
+  local path = ok and out and out:match("^(/[^\r\n]+)")
+  return path
+end
+
+-- Where to run `name` from: {path = ..., host = bool}, or nil if not found.
+-- In Flatpak, tools inside the sandbox are preferred (the GNOME runtime
+-- ships zenity); others (pdftk) run on the host via flatpak-spawn.
+function M.locate(name)
+  if tool_cache[name] then return tool_cache[name] end
+  local t
+  local path = find_local(name)
+  if path then
+    t = {path = path, host = false}
+  elseif M.IS_FLATPAK and name ~= "flatpak-spawn" then
+    path = find_host(name)
+    if path then t = {path = path, host = true} end
+  end
+  tool_cache[name] = t
+  return t
+end
+
+-- Full path of an external program, or nil when it cannot be found.
+function M.find_tool(name)
+  local t = M.locate(name)
+  return t and t.path
 end
 
 -- How to install a missing tool on this platform.
@@ -199,7 +255,17 @@ function M.install_hint(name)
       pdftk = "e.g. sudo dnf install pdftk-java / sudo apt install pdftk-java / sudo pacman -S pdftk",
     }
   end
-  return string.format("'%s' was not found.\n\nInstall it with:\n  %s", name, hints[name] or name)
+  local msg = string.format("'%s' was not found.\n\nInstall it with:\n  %s", name, hints[name] or name)
+  if M.IS_FLATPAK then
+    msg = string.format("'%s' was not found inside the Flatpak sandbox.\n\n", name) ..
+      "Install it on your system:\n  " .. (hints[name] or name) .. "\n\n"
+    if not M.flatpak_host_allowed() then
+      msg = msg .. "Then allow Xournal++ to run it (this lets Xournal++ start programs outside its sandbox):\n" ..
+        "  flatpak override --user --talk-name=org.freedesktop.Flatpak " ..
+        (os.getenv("FLATPAK_ID") or "com.github.xournalpp.xournalpp") .. "\n\nand restart Xournal++."
+    end
+  end
+  return msg
 end
 
 local flavor_cache
@@ -254,8 +320,12 @@ end
 -- Returns output (string, possibly empty), success (exit code 0).
 function M.run(argv)
   local resolved = {}
-  for i, a in ipairs(argv) do resolved[i] = a end
-  resolved[1] = M.find_tool(argv[1]) or argv[1]
+  local t = M.locate(argv[1])
+  if t and t.host then
+    resolved = {M.find_tool("flatpak-spawn") or "flatpak-spawn", "--host"}
+  end
+  for _, a in ipairs(argv) do resolved[#resolved + 1] = a end
+  if t then resolved[#resolved - #argv + 1] = t.path end
   local command = M.command_line(resolved)
   if not M.IS_WINDOWS then
     return M.exec(command .. " 2>/dev/null")

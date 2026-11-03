@@ -143,4 +143,45 @@ return {
     T.eq(platform.zenity_flavor(), "gnome")
     package.loaded.bm_platform = nil
   end},
+
+  {"Flatpak: host tools run through flatpak-spawn --host", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    if platform.IS_WINDOWS then return end
+    platform.IS_FLATPAK = true
+    platform.locate = function(name)
+      if name == "pdftk" then return {path = "/usr/bin/pdftk", host = true} end
+      if name == "flatpak-spawn" then return {path = "/usr/bin/flatpak-spawn", host = false} end
+      return {path = "/usr/bin/" .. name, host = false}
+    end
+    platform.find_tool = function(n) return platform.locate(n).path end
+    local cmds = {}
+    platform.exec = function(cmd) cmds[#cmds + 1] = cmd return "", true end
+    platform.run({"pdftk", "a b.pdf", "dump_data_utf8"})
+    platform.run({"zenity", "--entry"})
+    T.eq(cmds[1], "'/usr/bin/flatpak-spawn' '--host' '/usr/bin/pdftk' 'a b.pdf' 'dump_data_utf8' 2>/dev/null")
+    T.eq(cmds[2], "'/usr/bin/zenity' '--entry' 2>/dev/null")
+    package.loaded.bm_platform = nil
+  end},
+
+  {"Flatpak: temp files go to a host-visible directory", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    if platform.IS_WINDOWS then return end
+    platform.IS_FLATPAK = true
+    local saved_app = _G.app
+    _G.app = nil
+    local cache = os.getenv("XDG_CACHE_HOME")
+    if cache and cache ~= "" then
+      T.eq(platform.temp_dir(), cache)
+    else
+      T.eq(platform.temp_dir(), os.getenv("HOME"), "falls back to the (shared) home directory")
+    end
+    _G.app = {getFolder = function() return "/home/u/.var/app/x/.local/state/plugin-state/Bookmarks" end}
+    if not (cache and cache ~= "") then
+      T.eq(platform.temp_dir(), "/home/u/.var/app/x/.local/state/plugin-state/Bookmarks")
+    end
+    _G.app = saved_app
+    package.loaded.bm_platform = nil
+  end},
 }
