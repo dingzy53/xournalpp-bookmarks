@@ -1,7 +1,7 @@
-local utf8_to_html = require("utf8_to_html")
 local platform = require("bm_platform")
 local model = require("bm_model")
 local ui = require("bm_ui")
+local pdf = require("bm_pdf")
 
 local IS_WINDOWS = platform.IS_WINDOWS
 
@@ -246,45 +246,16 @@ function export_with_bookmarks()
     local fname = tempBase:match("[^\\]+$") or tempBase:sub(2)
     tempBase = tempDir .. "\\" .. fname
   end
-  local tempData = tempBase .. ".txt"
   local tempPdf = tempBase .. "_1337__.pdf"
 
   -- Export base PDF from Xournal++
   app.export({outputFile = tempPdf})
 
-  -- Dump existing PDF metadata
-  if not platform.execute({"pdftk", tempPdf, "dump_data", "output", tempData}) then
-    os.remove(tempPdf)
-    os.remove(tempData)
-    show_msg("Failed to dump PDF metadata with pdftk.", true)
-    return
-  end
-
-  local file = io.open(tempData, "a+")
-  if not file then
-    os.remove(tempPdf)
-    os.remove(tempData)
-    show_msg("Failed to open temporary metadata file.", true)
-    return
-  end
-
-  for _, b in ipairs(model.collect(structure)) do
-    file:write("BookmarkBegin\n")
-    file:write("BookmarkTitle: " .. utf8_to_html(b.title) .. "\n")
-    file:write("BookmarkLevel: 1\n")
-    file:write("BookmarkPageNumber: " .. b.page .. "\n")
-  end
-  file:close()
-
-  -- Update PDF with new bookmarks
-  local updateOk = platform.execute({"pdftk", tempPdf, "update_info", tempData, "output", path})
-
-  -- Cleanup temporary files
-  os.remove(tempData)
+  local ok, err = pdf.add_bookmarks(tempPdf, path, model.collect(structure))
   os.remove(tempPdf)
 
-  if not updateOk then
-    show_msg("Failed to create PDF with bookmarks using pdftk.", true)
+  if not ok then
+    show_msg(err, true)
   else
     show_msg("Successfully exported PDF with bookmarks:\n" .. path, false)
   end
