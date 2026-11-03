@@ -1,6 +1,7 @@
 local utf8_to_html = require("utf8_to_html")
 local platform = require("bm_platform")
 local model = require("bm_model")
+local ui = require("bm_ui")
 
 local IS_WINDOWS = platform.IS_WINDOWS
 
@@ -18,19 +19,9 @@ local function show_msg(msg, is_error)
   end
 end
 
--- Helper to parse unique bookmark ID from zenity output
+-- Parse the "page_layer" ID returned by the bookmark list
 local function parse_bookmark_id(selected_id)
-  if not selected_id or selected_id == "" then return nil, nil end
-  -- Windows format: "[P_L] Page P: Name"
-  local p, l = selected_id:match("%[(%d+)_(%d+)%]")
-  if not p then
-    -- Linux format: "P_L"
-    p, l = selected_id:match("^(%d+)_(%d+)$")
-  end
-  if not p then
-    -- Generic fallback
-    p, l = selected_id:match("(%d+)_(%d+)")
-  end
+  local p, l = selected_id:match("^(%d+)_(%d+)$")
   return tonumber(p), tonumber(l)
 end
 
@@ -65,8 +56,7 @@ local function delete_layer(page, layerID)
 end
 
 local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
-  local newPageStr = platform.run_zenity({"zenity", "--entry", "--title=" .. title,
-    "--text=Page Number (1-" .. numPages .. "):", "--entry-text=" .. tostring(defaultPage)})
+  local newPageStr = ui.entry(title, "Page Number (1-" .. numPages .. "):", tostring(defaultPage))
   if newPageStr == nil then return nil end -- Cancelled
 
   local newPage = tonumber(newPageStr)
@@ -75,9 +65,11 @@ local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
     return nil
   end
 
-  local newName = platform.run_zenity({"zenity", "--entry", "--title=" .. title,
-    "--text=Bookmark Name:", "--entry-text=" .. defaultName})
+  local newName = ui.entry(title, "Bookmark Name:", defaultName)
   if newName == nil then return nil end -- Cancelled
+  -- Characters that cannot be passed to zenity are replaced in the pre-filled
+  -- text; keep the original name when the user did not change it.
+  if newName == platform.sanitize_arg(defaultName) then newName = defaultName end
 
   return newPage, newName
 end
@@ -112,7 +104,7 @@ function new_bookmark(name)
 end
 
 function dialog_new_bookmark()
-  local name = platform.run_zenity({"zenity", "--entry", "--title=New Bookmark", "--text=Enter bookmark name:"})
+  local name = ui.entry("New Bookmark", "Enter bookmark name:")
   if name ~= nil then
     new_bookmark(name)
   end
@@ -161,41 +153,41 @@ function view_bookmarks()
     return
   end
 
-  local argv = {"zenity", "--list", "--title=Bookmark Manager", "--width=500", "--height=400",
-    "--text=Select a bookmark to manage:"}
+  -- 1. Get the selected bookmark
+  local oldPage, oldLayerID
   if IS_WINDOWS then
-    -- Windows: single-column list with combined text
-    table.insert(argv, "--column=Bookmarks")
-    for _, b in ipairs(bookmarks) do
-      local unique_id = b.page .. "_" .. b.layer
-      table.insert(argv, string.format("[%s] Page %d: %s", unique_id, b.page, model.display_title(b.title)))
+    -- Windows (ncruces zenity): single column only; paginated for cmd.exe's length limit
+    local items = {}
+    for i, b in ipairs(bookmarks) do
+      items[i] = string.format("[%d_%d] Page %d: %s", b.page, b.layer, b.page, model.display_title(b.title))
     end
+    local idx = ui.choose("Bookmark Manager", "Select a bookmark to manage:", "Bookmarks", items,
+      {width = 500, height = 400})
+    if not idx then return end -- Cancelled
+    oldPage, oldLayerID = bookmarks[idx].page, bookmarks[idx].layer
   else
-    -- Linux: multi-column list
-    for _, a in ipairs({"--column=ID", "--column=Page", "--column=Name", "--hide-column=1"}) do
-      table.insert(argv, a)
-    end
+    -- Linux: multi-column list with a hidden ID column
+    local argv = {"zenity", "--list", "--title=Bookmark Manager", "--width=500", "--height=400",
+      "--text=Select a bookmark to manage:", "--column=ID", "--column=Page", "--column=Name", "--hide-column=1"}
     for _, b in ipairs(bookmarks) do
       table.insert(argv, b.page .. "_" .. b.layer)
       table.insert(argv, tostring(b.page))
       table.insert(argv, model.display_title(b.title))
     end
+    local selected_id = platform.run_zenity(argv)
+    if not selected_id or selected_id == "" then return end -- Cancelled
+    oldPage, oldLayerID = parse_bookmark_id(selected_id)
+    if not oldPage or not oldLayerID then return end
   end
-
-  -- 1. Get the selected bookmark
-  local selected_id = platform.run_zenity(argv)
-  if not selected_id or selected_id == "" then return end -- Cancelled
-
-  local oldPage, oldLayerID = parse_bookmark_id(selected_id)
-  if not oldPage or not oldLayerID then return end
 
   local targetLayer = structure.pages[oldPage] and structure.pages[oldPage].layers[oldLayerID]
   local oldName = targetLayer and model.title_of(targetLayer.name) or ""
 
   -- 2. Ask what to do with it
-  local action = platform.run_zenity({"zenity", "--list", "--title=Bookmark Action",
-    "--text=Action for: " .. model.display_title(oldName), "--column=Action", "Jump To", "Edit", "Delete"})
-  if not action or action == "" then return end -- Cancelled
+  local actions = {"Jump To", "Edit", "Delete"}
+  local actionIdx = ui.choose("Bookmark Action", "Action for: " .. model.display_title(oldName), "Action", actions)
+  if not actionIdx then return end -- Cancelled
+  local action = actions[actionIdx]
 
   if action == "Jump To" then
     app.setCurrentPage(oldPage)
@@ -227,7 +219,7 @@ function export()
 end
 
 function export_with_bookmarks()
-  if not platform.execute({"pdftk", "--version"}, true) then
+  if not platform.execute({"pdftk", "--version"}) then
     show_msg("pdftk is missing or not in system PATH.", true)
     return
   end

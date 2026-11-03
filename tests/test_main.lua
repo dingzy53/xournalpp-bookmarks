@@ -45,9 +45,7 @@ return {
   {"view_bookmarks delete removes the layer", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    -- the list returns the first column; on Linux that is "page_layer", on Windows the combined text
-    local id = platform.IS_WINDOWS and "[2_2] Page 2: Two" or "2_2"
-    T.script_dialogs(platform, {id, "Delete"})
+    T.script_dialogs(platform, {"2_2", "Delete"})
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1"})
     T.eq(f.currentPage, 1)
