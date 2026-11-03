@@ -1,45 +1,11 @@
 local utf8_to_html = require("utf8_to_html")
+local platform = require("bm_platform")
+local model = require("bm_model")
 
--- Detect OS: "\\" = Windows, "/" = Linux/Mac
-local IS_WINDOWS = (package.config:sub(1,1) == "\\")
+local IS_WINDOWS = platform.IS_WINDOWS
 
 -- Default export path suggestion
 local DEFAULT_EXPORT_PATH = IS_WINDOWS and ((os.getenv("TEMP") or "C:\\Temp") .. "\\temp") or "/tmp/temp"
-
--- Helper to safely escape strings for shell commands (Bash or Windows cmd)
-local function sh_escape(str)
-  str = tostring(str or "")
-  if IS_WINDOWS then
-    -- Windows cmd: double quotes; escape inner double quotes
-    return '"' .. string.gsub(str, '"', '\\"') .. '"'
-  else
-    -- POSIX shell: single quotes; escape inner single quotes
-    return "'" .. string.gsub(str, "'", "'\\''") .. "'"
-  end
-end
-
--- Helper to run zenity and cleanly handle user cancellations
-local function run_zenity(cmd)
-  if IS_WINDOWS then
-    cmd = cmd .. " 2>&1"
-  end
-  local handle = io.popen(cmd)
-  if not handle then return nil end
-  local result = handle:read("*a")
-  local success = handle:close()
-
-  if not result then return nil end
-  -- Strip both \r and \n so Windows CRLF does not break string equality comparisons
-  result = string.gsub(result, "[\r\n]", "")
-
-  if IS_WINDOWS then
-    if result == "" then return nil end
-  else
-    -- If not successful (e.g., Cancel clicked) and no text returned, return nil
-    if not success and result == "" then return nil end
-  end
-  return result
-end
 
 -- Wrapper for message dialogs (compatible across Xournal++ versions and platforms)
 local function show_msg(msg, is_error)
@@ -48,8 +14,7 @@ local function show_msg(msg, is_error)
   elseif app.msgbox then
     app.msgbox(msg, {[1] = "OK"})
   else
-    local flag = is_error and "--error" or "--info"
-    os.execute(string.format("zenity %s --text=%s", flag, sh_escape(msg)))
+    platform.execute({"zenity", is_error and "--error" or "--info", "--text=" .. msg})
   end
 end
 
@@ -99,12 +64,9 @@ local function delete_layer(page, layerID)
   end
 end
 
--- Replaces the LGI edit_bookmark function using Zenity
 local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
-  -- Ask for Page (pre-filled)
-  local page_cmd = string.format('zenity --entry --title=%s --text="Page Number (1-%d):" --entry-text=%s',
-    sh_escape(title), numPages, sh_escape(tostring(defaultPage)))
-  local newPageStr = run_zenity(page_cmd)
+  local newPageStr = platform.run_zenity({"zenity", "--entry", "--title=" .. title,
+    "--text=Page Number (1-" .. numPages .. "):", "--entry-text=" .. tostring(defaultPage)})
   if newPageStr == nil then return nil end -- Cancelled
 
   local newPage = tonumber(newPageStr)
@@ -113,10 +75,8 @@ local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
     return nil
   end
 
-  -- Ask for Name (pre-filled)
-  local name_cmd = string.format('zenity --entry --title=%s --text="Bookmark Name:" --entry-text=%s',
-    sh_escape(title), sh_escape(defaultName))
-  local newName = run_zenity(name_cmd)
+  local newName = platform.run_zenity({"zenity", "--entry", "--title=" .. title,
+    "--text=Bookmark Name:", "--entry-text=" .. defaultName})
   if newName == nil then return nil end -- Cancelled
 
   return newPage, newName
@@ -126,7 +86,6 @@ end
 -- Public Plugin Callbacks (Registered with Xournal++)
 --------------------------------------------------------------------------------
 
--- Register Toolbar & Menu
 function initUi()
   app.registerUi({menu="Previous Bookmark", toolbarId="CUSTOM_PREVIOUS_BOOKMARK", callback="search_bookmark", mode=-1, iconName="go-previous"})
   app.registerUi({menu="New Bookmark", toolbarId="CUSTOM_NEW_BOOKMARK", callback="dialog_new_bookmark", iconName="bookmark-new-symbolic"})
@@ -144,19 +103,16 @@ function new_bookmark(name)
   app.layerAction("ACTION_NEW_LAYER")
   if type(name) == "string" and name ~= "" then
     -- Strip any newlines that would break pdftk syntax
-    local cleanName = name:gsub("[\r\n]", " ")
-    app.setCurrentLayerName("Bookmark::" .. cleanName)
+    app.setCurrentLayerName(model.layer_name((name:gsub("[\r\n]", " "))))
   else
-    app.setCurrentLayerName("Bookmark::")
+    app.setCurrentLayerName(model.layer_name(""))
   end
   app.setLayerVisibility(false)
   app.setCurrentLayer(currentLayerID)
 end
 
 function dialog_new_bookmark()
-  local cmd = 'zenity --entry --title="New Bookmark" --text="Enter bookmark name:"'
-  local name = run_zenity(cmd)
-
+  local name = platform.run_zenity({"zenity", "--entry", "--title=New Bookmark", "--text=Enter bookmark name:"})
   if name ~= nil then
     new_bookmark(name)
   end
@@ -176,15 +132,10 @@ function search_bookmark(mode)
     page = page + mode
     if page > numPages then page = 1 end
     if page < 1 then page = numPages end
-
-    local layers = structure.pages[page].layers
-    for u, v in pairs(layers) do
-      if v and v.name and v.name:sub(1, 10) == "Bookmark::" then
-        nextBookmark = page
-        break
-      end
+    if #model.collect_page(structure, page) > 0 then
+      nextBookmark = page
+      break
     end
-    if nextBookmark ~= nil then break end
   until page == currentPage
 
   if nextBookmark == nil then
@@ -204,81 +155,46 @@ function view_bookmarks()
     return
   end
 
-  local cmd, hasBookmarks
-
-  if IS_WINDOWS then
-    -- Windows: single-column list with combined text
-    cmd = 'zenity --list --title="Bookmark Manager" --width=500 --height=400 --text="Select a bookmark to manage:" --column="Bookmarks"'
-    hasBookmarks = false
-
-    for page = 1, numPages do
-      local bookmarkLayers = {}
-      for u, v in pairs(structure.pages[page].layers) do
-        if type(u) == "number" and v and v.name and v.name:sub(1, 10) == "Bookmark::" then
-          table.insert(bookmarkLayers, {id = u, layer = v})
-        end
-      end
-      table.sort(bookmarkLayers, function(a, b) return a.id < b.id end)
-
-      for _, item in ipairs(bookmarkLayers) do
-        hasBookmarks = true
-        local display_name = item.layer.name:sub(11)
-        if display_name == "" then display_name = "(No name)" end
-
-        local unique_id = tostring(page) .. "_" .. tostring(item.id)
-        local combined_text = string.format("[%s] Page %s: %s", unique_id, tostring(page), display_name)
-        cmd = cmd .. " " .. sh_escape(combined_text)
-      end
-    end
-  else
-    -- Linux: multi-column list
-    cmd = 'zenity --list --title="Bookmark Manager" --width=500 --height=400 --text="Select a bookmark to manage:" --column="ID" --column="Page" --column="Name" --hide-column=1'
-    hasBookmarks = false
-
-    for page = 1, numPages do
-      local bookmarkLayers = {}
-      for u, v in pairs(structure.pages[page].layers) do
-        if type(u) == "number" and v and v.name and v.name:sub(1, 10) == "Bookmark::" then
-          table.insert(bookmarkLayers, {id = u, layer = v})
-        end
-      end
-      table.sort(bookmarkLayers, function(a, b) return a.id < b.id end)
-
-      for _, item in ipairs(bookmarkLayers) do
-        hasBookmarks = true
-        local display_name = item.layer.name:sub(11)
-        if display_name == "" then display_name = "(No name)" end
-
-        local unique_id = tostring(page) .. "_" .. tostring(item.id)
-        cmd = cmd .. string.format(" %s %s %s", sh_escape(unique_id), sh_escape(tostring(page)), sh_escape(display_name))
-      end
-    end
-  end
-
-  if not hasBookmarks then
+  local bookmarks = model.collect(structure)
+  if #bookmarks == 0 then
     show_msg("No bookmarks exist in this document.", false)
     return
   end
 
+  local argv = {"zenity", "--list", "--title=Bookmark Manager", "--width=500", "--height=400",
+    "--text=Select a bookmark to manage:"}
+  if IS_WINDOWS then
+    -- Windows: single-column list with combined text
+    table.insert(argv, "--column=Bookmarks")
+    for _, b in ipairs(bookmarks) do
+      local unique_id = b.page .. "_" .. b.layer
+      table.insert(argv, string.format("[%s] Page %d: %s", unique_id, b.page, model.display_title(b.title)))
+    end
+  else
+    -- Linux: multi-column list
+    for _, a in ipairs({"--column=ID", "--column=Page", "--column=Name", "--hide-column=1"}) do
+      table.insert(argv, a)
+    end
+    for _, b in ipairs(bookmarks) do
+      table.insert(argv, b.page .. "_" .. b.layer)
+      table.insert(argv, tostring(b.page))
+      table.insert(argv, model.display_title(b.title))
+    end
+  end
+
   -- 1. Get the selected bookmark
-  local selected_id = run_zenity(cmd)
+  local selected_id = platform.run_zenity(argv)
   if not selected_id or selected_id == "" then return end -- Cancelled
 
   local oldPage, oldLayerID = parse_bookmark_id(selected_id)
   if not oldPage or not oldLayerID then return end
 
-  -- Get old name directly from structure
-  local oldName = ""
   local targetLayer = structure.pages[oldPage] and structure.pages[oldPage].layers[oldLayerID]
-  if targetLayer and targetLayer.name then
-    oldName = targetLayer.name:sub(11)
-  end
+  local oldName = targetLayer and model.title_of(targetLayer.name) or ""
 
   -- 2. Ask what to do with it
-  local action_prompt = "Action for: " .. (oldName ~= "" and oldName or "(No name)")
-  local action_cmd = string.format('zenity --list --title="Bookmark Action" --text=%s --column="Action" "Jump To" "Edit" "Delete"',
-    sh_escape(action_prompt))
-  local action = run_zenity(action_cmd)
+  local action = platform.run_zenity({"zenity", "--list", "--title=Bookmark Action",
+    "--text=Action for: " .. model.display_title(oldName), "--column=Action", "Jump To", "Edit", "Delete"})
   if not action or action == "" then return end -- Cancelled
 
   if action == "Jump To" then
@@ -293,7 +209,7 @@ function view_bookmarks()
         app.setCurrentPage(oldPage)
         local currentLayerID = structure.pages[oldPage].currentLayer
         app.setCurrentLayer(oldLayerID)
-        app.setCurrentLayerName("Bookmark::" .. (newName or ""))
+        app.setCurrentLayerName(model.layer_name(newName))
         app.setCurrentLayer(currentLayerID)
       else
         delete_layer(oldPage, oldLayerID)
@@ -311,9 +227,7 @@ function export()
 end
 
 function export_with_bookmarks()
-  -- Detect OS to use the correct null device for PATH check
-  local null_device = IS_WINDOWS and "NUL" or "/dev/null"
-  if not os.execute("pdftk --version > " .. null_device .. " 2>&1") then
+  if not platform.execute({"pdftk", "--version"}, true) then
     show_msg("pdftk is missing or not in system PATH.", true)
     return
   end
@@ -347,34 +261,13 @@ function export_with_bookmarks()
   app.export({outputFile = tempPdf})
 
   -- Dump existing PDF metadata
-  local dumpCmd = string.format("pdftk %s dump_data output %s", sh_escape(tempPdf), sh_escape(tempData))
-  local dumpOk = os.execute(dumpCmd)
-  if not dumpOk then
+  if not platform.execute({"pdftk", tempPdf, "dump_data", "output", tempData}) then
     os.remove(tempPdf)
     os.remove(tempData)
     show_msg("Failed to dump PDF metadata with pdftk.", true)
     return
   end
 
-  -- Collect bookmarks in page and layer order
-  local bookmarkTable = {}
-  local numPages = #structure.pages
-  for page = 1, numPages do
-    local bookmarkLayers = {}
-    for u, v in pairs(structure.pages[page].layers) do
-      if type(u) == "number" and v and v.name and v.name:sub(1, 10) == "Bookmark::" then
-        table.insert(bookmarkLayers, {id = u, layer = v})
-      end
-    end
-    table.sort(bookmarkLayers, function(a, b) return a.id < b.id end)
-
-    for _, item in ipairs(bookmarkLayers) do
-      local rawName = item.layer.name:sub(11)
-      table.insert(bookmarkTable, {page = page, name = utf8_to_html(rawName)})
-    end
-  end
-
-  -- Append bookmarks to dump_data file
   local file = io.open(tempData, "a+")
   if not file then
     os.remove(tempPdf)
@@ -383,18 +276,16 @@ function export_with_bookmarks()
     return
   end
 
-  for _, bookmark in ipairs(bookmarkTable) do
+  for _, b in ipairs(model.collect(structure)) do
     file:write("BookmarkBegin\n")
-    file:write("BookmarkTitle: " .. bookmark.name .. "\n")
+    file:write("BookmarkTitle: " .. utf8_to_html(b.title) .. "\n")
     file:write("BookmarkLevel: 1\n")
-    file:write("BookmarkPageNumber: " .. bookmark.page .. "\n")
+    file:write("BookmarkPageNumber: " .. b.page .. "\n")
   end
   file:close()
 
   -- Update PDF with new bookmarks
-  local updateCmd = string.format("pdftk %s update_info %s output %s",
-    sh_escape(tempPdf), sh_escape(tempData), sh_escape(path))
-  local updateOk = os.execute(updateCmd)
+  local updateOk = platform.execute({"pdftk", tempPdf, "update_info", tempData, "output", path})
 
   -- Cleanup temporary files
   os.remove(tempData)
