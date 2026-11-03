@@ -17,6 +17,7 @@ local function need(tool)
 end
 
 local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
+  -- defaultName includes the level prefix ("## Title")
   local newPageStr = ui.entry(title, "Page Number (1-" .. numPages .. "):", tostring(defaultPage))
   if newPageStr == nil then return nil end -- Cancelled
 
@@ -26,7 +27,8 @@ local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
     return nil
   end
 
-  local newName = ui.entry(title, "Bookmark Name:", defaultName)
+  local newName = ui.entry(title, "Bookmark name (\"## Name\" = level 2, \"### Name\" = level 3):",
+    defaultName)
   if newName == nil then return nil end -- Cancelled
   -- Characters that cannot be passed to zenity are replaced in the pre-filled
   -- text; keep the original name when the user did not change it.
@@ -48,19 +50,44 @@ function initUi()
   app.registerUi({menu="Export to PDF with Bookmarks", toolbarId="CUSTOM_EXPORT_WITH_BOOKMARKS", callback="export_with_bookmarks", iconName="xopp-document-export-pdf"})
 end
 
-function new_bookmark(name)
-  if type(name) ~= "string" then name = "" end
+-- Clean a name typed by the user and split off its "## " level prefix.
+local function parse_input(text)
   -- Strip any newlines that would break pdftk syntax
-  name = name:gsub("[\r\n]", " ")
-  doc.add_bookmark(app.getDocumentStructure().currentPage, name)
+  text = (text or ""):gsub("[\r\n]", " ")
+  return model.parse_title(text)
 end
 
-function dialog_new_bookmark()
-  if not need("zenity") then return end
-  local name = ui.entry("New Bookmark", "Enter bookmark name:")
-  if name ~= nil then
-    new_bookmark(name)
+-- Level a new bookmark on the current page gets by default: the same level
+-- as the bookmark it follows in the outline (a sibling), else 1.
+local function sibling_level()
+  local structure = app.getDocumentStructure()
+  return model.previous_level(model.collect(structure), structure.currentPage) or 1
+end
+
+-- "New Bookmark (No dialog)": an untitled sibling of the previous bookmark.
+function new_bookmark(name)
+  local page = app.getDocumentStructure().currentPage
+  if type(name) == "string" and name ~= "" then
+    local level, title = parse_input(name)
+    doc.add_bookmark(page, title, level)
+  else
+    doc.add_bookmark(page, "", sibling_level())
   end
+end
+
+local function dialog_add(level, heading)
+  if not need("zenity") then return end
+  local text = ui.entry(heading,
+    "Bookmark name (\"## Name\" = level 2, \"### Name\" = level 3):", model.level_prefix(level))
+  if text == nil then return end -- Cancelled
+  local lvl, title = parse_input(text)
+  doc.add_bookmark(app.getDocumentStructure().currentPage, title, lvl)
+end
+
+-- "New Bookmark": the dialog is pre-filled with the previous bookmark's
+-- level prefix, so pressing Enter after typing a name creates a sibling.
+function dialog_new_bookmark()
+  dialog_add(sibling_level(), "New Bookmark")
 end
 
 -- mode = -1 for searching backwards, or 1 for searching forwards
@@ -117,8 +144,8 @@ function view_bookmarks()
   if not idx or not bookmarks[idx] then return end -- Cancelled
   local oldPage, oldLayerID = bookmarks[idx].page, bookmarks[idx].layer
 
-  local targetLayer = structure.pages[oldPage] and structure.pages[oldPage].layers[oldLayerID]
-  local oldName = targetLayer and model.title_of(targetLayer.name) or ""
+  local selected = bookmarks[idx]
+  local oldName = selected.title
 
   -- 2. Ask what to do with it
   local actions = {"Jump To", "Edit", "Delete"}
@@ -134,14 +161,15 @@ function view_bookmarks()
   elseif action == "Delete" then
     doc.delete_bookmark(oldPage, oldLayerID)
   elseif action == "Edit" then
-    local newPage, newName = edit_bookmark_zenity("Edit Bookmark", oldPage, oldName, numPages)
+    local newPage, newText = edit_bookmark_zenity("Edit Bookmark", oldPage,
+      model.format_title(selected.eff, selected.title), numPages)
     if newPage ~= nil then
-      newName = newName:gsub("[\r\n]", " ")
+      local newLevel, newName = parse_input(newText)
       if oldPage == newPage then
-        doc.rename_bookmark(oldPage, oldLayerID, newName)
+        doc.rename_bookmark(oldPage, oldLayerID, newName, newLevel)
       else
         doc.delete_bookmark(oldPage, oldLayerID)
-        doc.add_bookmark(newPage, newName)
+        doc.add_bookmark(newPage, newName, newLevel)
         app.setCurrentPage(newPage)
         app.scrollToPage(newPage)
       end

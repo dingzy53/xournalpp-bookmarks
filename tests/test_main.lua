@@ -200,4 +200,36 @@ return {
     T.eq(platform.default_export_path("", "/home/u/paper.pdf"), "/home/u/paper_annotated.pdf")
     T.eq(platform.default_export_path("", ""), os.getenv("HOME") .. "/bookmarks_export.pdf")
   end},
+
+  {"new bookmark dialog is pre-filled with the sibling level", function(T)
+    local f = Fake.new({pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::Ch"}, {name = "Bookmark::## Sec"}}},
+      {layers = {{name = "L"}}},
+    }, currentPage = 2})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"## Next sec"})
+    dialog_new_bookmark()
+    T.eq(calls[1][#calls[1]], "--entry-text=## ")
+    T.list_eq(f:names(2), {"L", "Bookmark::## Next sec"})
+  end},
+
+  {"no-dialog bookmark becomes a sibling of the previous one", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::Ch"}, {name = "Bookmark::### Deep"}}}, {}},
+      currentPage = 2})
+    T.load_plugin(f)
+    new_bookmark()
+    T.list_eq(f:names(2), {"Layer 1", "Bookmark::## "}, "eff level of '### Deep' after normalization is 2")
+  end},
+
+  {"edit keeps the level and can change it", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::## B"}}}, {}}})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"2", "Edit", "1", "## B renamed"})
+    view_bookmarks()
+    T.eq(calls[4][#calls[4]], "--entry-text=## B", "name dialog shows the level prefix")
+    T.list_eq(f:names(1), {"L", "Bookmark::A", "Bookmark::## B renamed"})
+    T.script_dialogs(platform, {"2", "Edit", "2", "## B renamed"})
+    view_bookmarks()
+    T.list_eq(f:names(2), {"Layer 1", "Bookmark::## B renamed"}, "moved with its level")
+  end},
 }

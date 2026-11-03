@@ -56,12 +56,12 @@ end
 -- layers, so bookmarks on one page keep the order in which they were
 -- created (inserting above the *current* layer made the order depend on
 -- which layer happened to be selected).
-function M.add_bookmark(page, title)
+function M.add_bookmark(page, title, level)
   return on_page(page, function(current)
     local s = app.getDocumentStructure()
     set_layer(layer_count(s, page))
     M.new_layer_above_current()
-    app.setCurrentLayerName(model.layer_name(title))
+    app.setCurrentLayerName(model.layer_name(title, level))
     app.setLayerVisibility(false)
     return current -- below the new layer, so its index is unchanged
   end)
@@ -76,10 +76,10 @@ local function select_bookmark_layer(page, layer)
   return pcall(app.setCurrentLayer, layer)
 end
 
-function M.rename_bookmark(page, layer, title)
+function M.rename_bookmark(page, layer, title, level)
   return on_page(page, function(current)
     if not select_bookmark_layer(page, layer) then return current end
-    app.setCurrentLayerName(model.layer_name(title))
+    app.setCurrentLayerName(model.layer_name(title, level))
     return current
   end)
 end
