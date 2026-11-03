@@ -6,6 +6,10 @@ local M = {}
 local PREV_PAGE = "« Previous page"
 local NEXT_PAGE = "» Next page"
 
+-- Note: `text` must be a fixed string. GNOME zenity parses --text as Pango
+-- markup while the ncruces port (Windows/macOS) shows it raw, so untrusted
+-- strings (bookmark names, paths) belong in the title or in list items.
+
 -- Text entry. Returns the entered string ("" allowed) or nil when cancelled.
 function M.entry(title, text, default)
   local argv = {"zenity", "--entry", "--title=" .. title, "--text=" .. text}

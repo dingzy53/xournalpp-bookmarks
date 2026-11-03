@@ -148,4 +148,16 @@ return {
     new_bookmark("X") -- must not raise
     app.setCurrentLayer = real
   end},
+
+  {"bookmark names never reach zenity --text", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::a <b> & c"}}}}})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"1_2", "Edit", "1", "x"})
+    view_bookmarks()
+    for _, argv in ipairs(calls) do
+      for _, a in ipairs(argv) do
+        T.truthy(not (a:find("^%-%-text=") and a:find("<b>", 1, true)), "name in --text: " .. a)
+      end
+    end
+  end},
 }

@@ -140,7 +140,9 @@ function view_bookmarks()
 
   -- 2. Ask what to do with it
   local actions = {"Jump To", "Edit", "Delete"}
-  local actionIdx = ui.choose("Bookmark Action", "Action for: " .. model.display_title(oldName), "Action", actions)
+  -- The name goes into the window title: zenity parses --text as Pango
+  -- markup (GNOME) or shows it raw (ncruces), so no escaping fits both.
+  local actionIdx = ui.choose("Bookmark: " .. model.display_title(oldName), "Choose an action:", "Action", actions)
   if not actionIdx then return end -- Cancelled
   local action = actions[actionIdx]
 
