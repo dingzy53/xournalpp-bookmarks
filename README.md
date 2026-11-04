@@ -128,3 +128,8 @@ The tests use an in-memory fake of the Xournal++ API. The export tests run the r
 ## License
 
 GNU General Public License v2 (GPLv2) — see [LICENSE](LICENSE).
+
+- Copyright (C) 2024–2025 Javier Reyes and contributors: the original [xournalpp-bookmarks](https://github.com/jereyes4/xournalpp-bookmarks).
+- Copyright (C) 2026 Ding Zheng Yuan: the zenity port and later changes.
+
+This is a modified version of the original plugin. The main changes: the `lgi`/Glade UI was replaced by zenity dialogs, the code was split into modules (`bm_*.lua`), and nested bookmarks, import, navigation and cross-platform support were added. The git history records every change.

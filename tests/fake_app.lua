@@ -1,3 +1,6 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2026 Ding Zheng Yuan
+--
 -- In-memory stand-in for the Xournal++ `app` Lua API, modelled on
 -- src/core/plugin/luapi_application.h and LayerController/XojPage semantics.
 local Fake = {}

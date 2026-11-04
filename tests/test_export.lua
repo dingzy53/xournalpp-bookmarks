@@ -1,3 +1,6 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2026 Ding Zheng Yuan
+--
 -- Integration tests for the export pipeline. They run the real `pdftk`
 -- (skipped when it is not installed) on a generated PDF.
 local Fake = require("fake_app")

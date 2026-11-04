@@ -1,3 +1,8 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2024-2025 Javier Reyes and contributors (original Bookmarks plugin)
+-- Copyright (C) 2026 Ding Zheng Yuan (zenity port and later changes)
+-- Modified by Ding Zheng Yuan in 2026; see README.md and the git history.
+--
 -- PDF outline handling through pdftk's metadata dump format.
 local platform = require("bm_platform")
 

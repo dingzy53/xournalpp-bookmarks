@@ -1,3 +1,6 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2026 Ding Zheng Yuan
+--
 -- Offline test runner. Usage (from the repository root):  lua tests/run.lua
 package.path = "Bookmarks/?.lua;tests/?.lua;" .. package.path
 

@@ -1,3 +1,8 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2024-2025 Javier Reyes and contributors (original Bookmarks plugin)
+-- Copyright (C) 2026 Ding Zheng Yuan (zenity port and later changes)
+-- Modified by Ding Zheng Yuan in 2026; see README.md and the git history.
+--
 -- Adapter around the Xournal++ `app` API. Uses current API calls where
 -- available (Xournal++ >= 1.3) and falls back to the deprecated ones that
 -- are scheduled for removal with the GTK4 port (1.2.x only has those).

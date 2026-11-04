@@ -1,3 +1,6 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2026 Ding Zheng Yuan
+
 local NASTY = {
   [[plain]],
   [[it's]],

@@ -1,3 +1,8 @@
+-- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
+-- Copyright (C) 2024-2025 Javier Reyes and contributors (original Bookmarks plugin)
+-- Copyright (C) 2026 Ding Zheng Yuan (zenity port and later changes)
+-- Modified by Ding Zheng Yuan in 2026; see README.md and the git history.
+--
 -- Pure bookmark model: no calls into Xournal++ or the shell.
 --
 -- A bookmark is a hidden layer named "Bookmark::<text>". The outline level is
