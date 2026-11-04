@@ -33,6 +33,13 @@ function T.load_plugin(fake)
   fake:install()
   local platform = require("bm_platform")
   platform.zenity_flavor = function() return "gnome" end
+  -- Dialogs are scripted (T.script_dialogs), so zenity need not be installed.
+  -- Other tools (pdftk) are still looked up for real.
+  local find_tool = platform.find_tool
+  platform.find_tool = function(name)
+    if name == "zenity" then return "/usr/bin/zenity" end
+    return find_tool(name)
+  end
   dofile("Bookmarks/main.lua")
   return platform
 end
