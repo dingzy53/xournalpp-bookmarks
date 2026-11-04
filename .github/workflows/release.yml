@@ -1,0 +1,40 @@
+# Publishes a release when a version tag is pushed: run the tests, then
+# attach Bookmarks.zip (the plugin folder, ready to unzip into the plugins folder).
+# The tag must equal version= in Bookmarks/plugin.ini, with no "v" prefix.
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check that the tag matches plugin.ini
+        run: |
+          version=$(sed -n 's/^version=//p' Bookmarks/plugin.ini | tr -d '\r')
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version=$version in Bookmarks/plugin.ini"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          lua5.4 tests/run.lua
+
+      - name: Package the plugin folder
+        run: zip -r Bookmarks.zip Bookmarks
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" Bookmarks.zip --title "$GITHUB_REF_NAME" --generate-notes
