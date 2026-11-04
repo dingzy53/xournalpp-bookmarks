@@ -1,12 +1,26 @@
 # Xournal++ Bookmarks (Zenity Version)
 
-This is a fork of [Bookmarks plugin by Jereyes](https://github.com/jereyes4/xournalpp-bookmarks).
+[![Release](https://img.shields.io/github/v/release/dingzy53/xournalpp-bookmarks)](https://github.com/dingzy53/xournalpp-bookmarks/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/dingzy53/xournalpp-bookmarks/total)](https://github.com/dingzy53/xournalpp-bookmarks/releases)
+[![Xournal++ 1.2+](https://img.shields.io/badge/Xournal%2B%2B-1.2%2B-1e88e5)](https://xournalpp.github.io)
+[![License: GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-blue)](LICENSE)
 
-This fork entirely removes the `lgi` dependency and replaces all user interface elements with **Zenity**.
+Add nested bookmarks to Xournal++ documents, and export the PDF with a matching outline.
 
-**Cross-platform**: one codebase for Linux (native packages and Flatpak), macOS and Windows.
+This is a fork of [Bookmarks plugin by Jereyes](https://github.com/jereyes4/xournalpp-bookmarks). It replaces the `lgi` dependency with **Zenity** dialogs, so one codebase works on Linux (native packages and Flatpak), macOS and Windows. See [License](#license).
 
-## Prerequisites
+<!-- Screenshot: docs/images/hero.png -->
+
+## Features
+
+- **Add bookmarks** with a name dialog, silently (no dialog), or as a **sub-bookmark** of the previous one
+- **Nested bookmarks** (chapters > sections > subsections, up to 9 levels)
+- **Navigate** between bookmarks (previous/next), or between **top-level** bookmarks only (chapter to chapter)
+- **Bookmark manager** with the outline shown indented: jump to, edit, move to another page, promote/demote (with sub-bookmarks), delete (only the bookmark, or with its sub-bookmarks)
+- **Import** the background PDF's table of contents as bookmarks (requires pdftk)
+- **Export to PDF** with an embedded, nested outline (requires pdftk). Titles are written as UTF-8, so any language, emoji and characters like `&` work. If the background PDF already has an outline, you can replace it or keep it.
+
+## Requirements
 
 No Lua modules required.
 
@@ -50,26 +64,21 @@ scoop install https://ncruces.github.io/scoop/zenity.json pdftk
 
 ## Installation
 
-1. Clone or download this repository.
-2. Copy the `Bookmarks` folder into your Xournal++ plugins directory:
+1. Install the [requirements](#requirements) for your system.
+2. Download `Bookmarks.zip` from the [latest release](https://github.com/dingzy53/xournalpp-bookmarks/releases/latest) and unzip it. You get a folder named `Bookmarks`.
+3. Move that folder into the Xournal++ plugins folder, so that you have `plugins/Bookmarks/plugin.ini`. Create the `plugins` folder if it doesn't exist.
 
-   | Platform | Plugins directory |
+   | System | Plugins folder |
    |---|---|
-   | Linux / macOS | `~/.config/xournalpp/plugins/` |
+   | Linux, macOS | `~/.config/xournalpp/plugins/` |
    | Linux, Flatpak | `~/.var/app/com.github.xournalpp.xournalpp/config/xournalpp/plugins/` |
    | Windows | `%LOCALAPPDATA%\xournalpp\plugins\` |
 
-3. Open Xournal++.
-4. Go to *Plugin > Plugin Manager* and enable the Bookmarks plugin, then restart Xournal++.
+4. Start Xournal++, open **Plugin → Plugin Manager**, tick **Bookmarks**, then restart Xournal++.
 
-## Features
+**Update or remove:** replace the `Bookmarks` folder with the new one, or delete it.
 
-- **Add bookmarks** with a name dialog, silently (no dialog), or as a **sub-bookmark** of the previous one
-- **Nested bookmarks** (chapters > sections > subsections, up to 9 levels)
-- **Navigate** between bookmarks (previous/next), or between **top-level** bookmarks only (chapter to chapter)
-- **Bookmark manager** with the outline shown indented: jump to, edit, move to another page, promote/demote (with sub-bookmarks), delete (only the bookmark, or with its sub-bookmarks)
-- **Import** the background PDF's table of contents as bookmarks (requires pdftk)
-- **Export to PDF** with an embedded, nested outline (requires pdftk). Titles are written as UTF-8, so any language, emoji and characters like `&` work. If the background PDF already has an outline, you can replace it or keep it.
+## Usage
 
 ### Levels
 
@@ -96,7 +105,14 @@ Each bookmark is a hidden layer on its page, named `Bookmark::<title>`, or `Book
 
 Older versions of this plugin (and the original upstream plugin) still see nested bookmarks. They show them flat, with the `##` prefix as part of the title.
 
-## Known behaviors
+## Privacy and security
+
+- **Running programs:** `zenity` for dialogs and `pdftk` for PDF import and export (on Windows, started through `cmd.exe`). Bookmark names are quoted before they reach these programs.
+- **Temporary files:** written to the system temp folder (under Flatpak, the app's cache folder, so that the host's pdftk can reach them) and deleted afterwards.
+- **Your files:** bookmarks are stored in the `.xopp` file. An exported PDF is written only where you choose.
+- **Network:** none.
+
+## Limitations
 
 - Xournal++ may briefly show "Not Responding" while a Zenity dialog is open. The plugin API only offers blocking calls to external programs.
 - On Windows, a console window may flash briefly when a dialog opens.
@@ -124,6 +140,13 @@ lua tests/run.lua
 ```
 
 The tests use an in-memory fake of the Xournal++ API. The export tests run the real `pdftk` when it is installed.
+
+### Releasing
+
+1. Set `version=` in `Bookmarks/plugin.ini` and commit.
+2. Tag that commit with the same version, without a `v`, and push both: `git tag 0.3.0 && git push origin main 0.3.0`.
+
+The Release workflow runs the tests and publishes `Bookmarks.zip`.
 
 ## License
 
