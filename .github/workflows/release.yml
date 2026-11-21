@@ -25,11 +25,23 @@ jobs:
             exit 1
           fi
 
-      - name: Run tests (the export tests need pdftk)
+      - name: Run tests on Lua 5.4 (the export tests need pdftk)
         run: |
           sudo apt-get update
           sudo apt-get install -y lua5.4 pdftk-java
           lua5.4 tests/run.lua
+
+      - name: Build Lua 5.5.1
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL https://www.lua.org/ftp/lua-5.5.1.tar.gz | tar xz
+          make -C lua-5.5.1 linux
+          echo "LUA55=$RUNNER_TEMP/lua-5.5.1/src" >> "$GITHUB_ENV"
+
+      - name: Check syntax and run tests with Lua 5.5
+        run: |
+          "$LUA55/luac" -p Bookmarks/*.lua tests/*.lua
+          "$LUA55/lua" tests/run.lua
 
       - name: Package the plugin folder
         run: zip -r Bookmarks.zip Bookmarks
