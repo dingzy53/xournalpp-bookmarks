@@ -83,8 +83,8 @@ end
 -- Outline entries of a dump, in order: {title, level, page}.
 function M.parse_outline(dump)
   local list, cur = {}, nil
-  for line in (dump .. "\n"):gmatch("([^\n]*)\n") do
-    line = line:gsub("\r$", "")
+  for raw_line in (dump .. "\n"):gmatch("([^\n]*)\n") do
+    local line = raw_line:gsub("\r$", "")
     if line:match("^BookmarkBegin%s*$") then
       cur = {title = "", level = 1, page = 0}
       list[#list + 1] = cur
