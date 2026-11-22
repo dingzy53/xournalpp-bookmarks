@@ -269,7 +269,10 @@ function M.install_hint(name)
       pdftk = "scoop install pdftk",
     }
   elseif M.is_mac() then
-    hints = {zenity = "brew install zenity   (or: brew install ncruces/tap/zenity)", pdftk = "brew install pdftk-java"}
+    hints = {
+      zenity = "brew install zenity   (or: brew install ncruces/tap/zenity)",
+      pdftk = "brew install pdftk-java   (or without Xcode: brew install --cask temurin + pdftk-all.jar; see README)",
+    }
   else
     hints = {
       zenity = "e.g. sudo dnf install zenity / sudo apt install zenity / sudo pacman -S zenity",
