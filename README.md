@@ -56,6 +56,22 @@ brew install zenity pdftk-java
 
 `brew install ncruces/tap/zenity` is a lighter alternative to GNOME zenity, with native macOS dialogs.
 
+**Without Xcode (macOS 14 Sonoma, older macOS, or Intel Macs):** Homebrew's `openjdk` formula only has bottles for Apple Silicon on macOS 15+. On older versions or Intel Macs, `brew install pdftk-java` tries to build OpenJDK from source, which needs full Xcode (Command Line Tools alone are not enough). Instead, install zenity and [Eclipse Temurin](https://adoptium.net/), then wrap `pdftk-all.jar` from [pdftk-java releases](https://gitlab.com/pdftk-java/pdftk/-/releases) in `~/.local/bin/pdftk`:
+
+```bash
+brew install zenity
+brew install --cask temurin
+mkdir -p ~/.local/share/pdftk ~/.local/bin
+curl -fL -o ~/.local/share/pdftk/pdftk-all.jar \
+  https://gitlab.com/api/v4/projects/5024297/packages/generic/pdftk-java/v3.3.3/pdftk-all.jar
+cat <<'EOF' > ~/.local/bin/pdftk
+#!/bin/sh
+exec java -jar "$HOME/.local/share/pdftk/pdftk-all.jar" "$@"
+EOF
+chmod +x ~/.local/bin/pdftk
+~/.local/bin/pdftk --version
+```
+
 ### Windows 11
 
 ```powershell

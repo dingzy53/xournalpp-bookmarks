@@ -132,6 +132,33 @@ return {
     local dirs = table.concat(platform.search_dirs(), ":")
     T.truthy(dirs:find("/opt/homebrew/bin", 1, true), "Homebrew (Apple Silicon) searched")
     T.truthy(dirs:find("/usr/local/bin", 1, true), "Homebrew (Intel) searched")
+    local home = os.getenv("HOME")
+    if home then T.truthy(dirs:find(home .. "/.local/bin", 1, true), "~/.local/bin searched") end
+    package.loaded.bm_platform = nil
+  end},
+
+  {"install_hint mentions no-Xcode fallback on macOS and keeps Linux hints", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    platform.IS_WINDOWS = false
+    platform.IS_FLATPAK = false
+
+    platform.is_mac = function() return true end
+    local mac_pdftk = platform.install_hint("pdftk")
+    T.truthy(mac_pdftk:find("brew install pdftk-java", 1, true), mac_pdftk)
+    T.truthy(mac_pdftk:find("brew install --cask temurin", 1, true), mac_pdftk)
+    T.truthy(mac_pdftk:find("pdftk-all.jar", 1, true), mac_pdftk)
+    local hint_line = mac_pdftk:match("Install it with:\n  (.+)$")
+    T.truthy(hint_line and not hint_line:find("\n", 1, true), "macOS hint should be one short line")
+
+    local mac_zenity = platform.install_hint("zenity")
+    T.truthy(mac_zenity:find("brew install zenity", 1, true), mac_zenity)
+    T.truthy(mac_zenity:find("ncruces/tap/zenity", 1, true), mac_zenity)
+
+    platform.is_mac = function() return false end
+    local linux_pdftk = platform.install_hint("pdftk")
+    T.truthy(linux_pdftk:find("sudo dnf install pdftk-java / sudo apt install pdftk-java / sudo pacman -S pdftk",
+      1, true), linux_pdftk)
     package.loaded.bm_platform = nil
   end},
 
