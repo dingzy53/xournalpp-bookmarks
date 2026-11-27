@@ -299,7 +299,7 @@ function M.install_hint(name)
     }
   elseif M.is_mac() then
     hints = {
-      zenity = "brew install zenity   (or: brew install ncruces/tap/zenity)",
+      zenity = "brew install zenity",
       pdftk = "brew install pdftk-java   (or without Xcode: brew install --cask temurin + pdftk-all.jar; see README)",
     }
   else
@@ -395,8 +395,15 @@ end
 
 -- Run a zenity dialog. Returns the output without line breaks, or nil when
 -- the dialog was cancelled or failed.
+-- On macOS, ncruces/zenity defaults to --modal=true and attaches JXA dialogs
+-- to Xournal++'s PID while Xournal++ is blocked in io.popen (deadlock).
 function M.run_zenity(argv)
-  local result, success = M.run(argv)
+  local call = argv
+  if argv[1] == "zenity" and M.is_mac() and M.zenity_flavor() == "ncruces" then
+    call = {"zenity", "--modal=false"}
+    for i = 2, #argv do call[#call + 1] = argv[i] end
+  end
+  local result, success = M.run(call)
   if not result or not success then return nil end
   -- Strip both \r and \n so Windows CRLF does not break string equality comparisons
   return (result:gsub("[\r\n]", ""))

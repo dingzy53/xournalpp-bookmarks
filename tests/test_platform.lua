@@ -153,7 +153,7 @@ return {
 
     local mac_zenity = platform.install_hint("zenity")
     T.truthy(mac_zenity:find("brew install zenity", 1, true), mac_zenity)
-    T.truthy(mac_zenity:find("ncruces/tap/zenity", 1, true), mac_zenity)
+    T.truthy(not mac_zenity:find("ncruces/tap/zenity", 1, true), mac_zenity)
 
     platform.is_mac = function() return false end
     local linux_pdftk = platform.install_hint("pdftk")
@@ -256,6 +256,33 @@ return {
     platform.IS_WINDOWS = true
     T.eq(platform.needs_temp_copy("C:\\Users\\u\\notes.pdf", "pdftk"), false)
     T.eq(platform.needs_temp_copy("C:\\Users\\u\\日本語.pdf", "pdftk"), true)
+    package.loaded.bm_platform = nil
+  end},
+
+  {"macOS with ncruces zenity passes --modal=false to avoid deadlock", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    local calls = {}
+    platform.run = function(argv) calls[#calls + 1] = argv return "ok\n", true end
+
+    local orig_argv = {"zenity", "--entry", "--title=T"}
+    platform.is_mac = function() return true end
+    platform.zenity_flavor = function() return "ncruces" end
+    T.eq(platform.run_zenity(orig_argv), "ok")
+    T.list_eq(calls[1], {"zenity", "--modal=false", "--entry", "--title=T"})
+    T.list_eq(orig_argv, {"zenity", "--entry", "--title=T"}, "caller argv must not be mutated")
+
+    platform.run_zenity({"false"})
+    T.list_eq(calls[2], {"false"})
+
+    platform.zenity_flavor = function() return "gnome" end
+    platform.run_zenity({"zenity", "--entry", "--title=T"})
+    T.list_eq(calls[3], {"zenity", "--entry", "--title=T"})
+
+    platform.is_mac = function() return false end
+    platform.zenity_flavor = function() return "ncruces" end
+    platform.run_zenity({"zenity", "--entry", "--title=T"})
+    T.list_eq(calls[4], {"zenity", "--entry", "--title=T"})
     package.loaded.bm_platform = nil
   end},
 }
