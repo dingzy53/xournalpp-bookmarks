@@ -174,13 +174,10 @@ function M.delete_bookmark(page, layer)
   return M.delete_bookmarks({{page = page, layer = layer}})
 end
 
--- app.openDialog parses the message as Pango markup.
-function M.escape_markup(s)
-  return (tostring(s or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
-end
-
+-- app.openDialog shows its message as plain text (gtk_message_dialog_format_secondary_text),
+-- not Pango markup, so do not HTML-escape `&`, `<`, or `>`.
 function M.message(msg, is_error)
-  app.openDialog(M.escape_markup(msg), {"OK"}, "", is_error or false)
+  app.openDialog(tostring(msg or ""), {"OK"}, "", is_error or false)
 end
 
 -- Async "Save as" dialog; calls global `callback(path)` ("" when cancelled).

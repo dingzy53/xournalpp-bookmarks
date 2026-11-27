@@ -178,7 +178,8 @@ return {
     T.list_eq(outline_of(dest), {"A@1:1"})
     T.list_eq(leftover_temp_files(p, before), {}, "leftover temp files")
     T.eq(f.messages[#f.messages].error, false)
-    T.truthy(f.messages[#f.messages].msg:find("&amp;", 1, true), f.messages[#f.messages].msg)
+    T.truthy(f.messages[#f.messages].msg:find("R&D <1>", 1, true), f.messages[#f.messages].msg)
+    T.truthy(not f.messages[#f.messages].msg:find("&amp;", 1, true), f.messages[#f.messages].msg)
     os.remove(dest)
     os.remove(src)
   end},

@@ -6,16 +6,6 @@
 local Fake = {}
 Fake.__index = Fake
 
-local function check_pango(msg)
-  local stripped = tostring(msg or "")
-    :gsub("&amp;", ""):gsub("&lt;", ""):gsub("&gt;", "")
-    :gsub("&quot;", ""):gsub("&apos;", "")
-    :gsub("&#%d+;", ""):gsub("&#x%x+;", "")
-  if stripped:find("[&<>]") then
-    error("invalid Pango markup in app.openDialog: " .. tostring(msg))
-  end
-end
-
 -- pages: list of { layers = { {name=..., visible=...}, ... } }
 function Fake.new(opts)
   opts = opts or {}
@@ -119,8 +109,7 @@ function Fake:install()
   end
 
   function app.openDialog(msg, buttons, cb, isError)
-    check_pango(msg)
-    table.insert(s.messages, {msg = msg, error = isError})
+    table.insert(s.messages, {msg = tostring(msg or ""), error = isError})
   end
 
   function app.fileDialogSave(cb, suggested)

@@ -120,9 +120,11 @@ return {
   {"view_bookmarks Move to Page validates and moves in one dialog", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    T.script_dialogs(platform, {"1", "Move to Page…", "1.5"})
+    local calls = T.script_dialogs(platform, {"1", "Move to Page…", "1.5"})
     view_bookmarks()
-    T.eq(f.messages[#f.messages].error, true)
+    T.eq(#f.messages, 0, "error is shown synchronously via zenity, not queued in openDialog")
+    T.eq(calls[4][2], "--error")
+    T.truthy(calls[4][4]:find("Invalid page number", 1, true), calls[4][4])
     T.list_eq(f:names(2), {"Layer 1", "Bookmark::Two"})
 
     T.script_dialogs(platform, {"1", "Move to Page…", "3"})
@@ -219,12 +221,12 @@ return {
     end
   end},
 
-  {"openDialog messages escape Pango markup characters", function(T)
+  {"openDialog messages pass plain text without HTML entity escaping", function(T)
     local f = doc()
     T.load_plugin(f)
     local d = require("bm_doc")
     d.message("Saved to /tmp/R&D <1>/out.pdf", false)
-    T.eq(f.messages[1].msg, "Saved to /tmp/R&amp;D &lt;1&gt;/out.pdf")
+    T.eq(f.messages[1].msg, "Saved to /tmp/R&D <1>/out.pdf")
   end},
 
   {"bookmark list on ncruces zenity uses one column", function(T)

@@ -173,7 +173,7 @@ local function move_bookmark_dialog(b, numPages)
   if newPageStr == nil then return end
   local newPage = tonumber(newPageStr)
   if not newPage or newPage ~= math.floor(newPage) or newPage < 1 or newPage > numPages then
-    show_msg("Invalid page number. Move cancelled.", true)
+    ui.error("Move Bookmark", "Invalid page number. Enter a whole number from 1 to " .. numPages .. ".")
     return
   end
   if newPage == b.page then return end

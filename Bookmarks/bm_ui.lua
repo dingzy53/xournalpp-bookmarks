@@ -116,4 +116,12 @@ function M.choose(title, text, column, items, opts)
   return M.choose_rows(title, text, {column}, items, opts)
 end
 
+function M.error(title, text)
+  platform.run_zenity({"zenity", "--error", "--title=" .. title, "--text=" .. text})
+end
+
+function M.info(title, text)
+  platform.run_zenity({"zenity", "--info", "--title=" .. title, "--text=" .. text})
+end
+
 return M
