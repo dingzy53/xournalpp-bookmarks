@@ -12,6 +12,23 @@ local function doc()
 end
 
 return {
+  {"initUi registers 7 valid menu entries and toolbar buttons", function(T)
+    local f = doc()
+    T.load_plugin(f)
+    f:run_init_ui()
+    T.eq(#f.registered, 7)
+    local seen_toolbar = {}
+    for _, item in ipairs(f.registered) do
+      T.truthy(type(item.menu) == "string" and item.menu ~= "", "menu label required")
+      T.truthy(type(_G[item.callback]) == "function", "missing callback " .. tostring(item.callback))
+      T.truthy(item.toolbarId and not seen_toolbar[item.toolbarId], "unique toolbarId " .. tostring(item.toolbarId))
+      seen_toolbar[item.toolbarId] = true
+      T.list_eq(item.parentPath, {"Bookmarks"})
+    end
+    local ok = pcall(app.registerUi, {menu = "Late", callback = "new_bookmark"})
+    T.eq(ok, false, "registerUi outside initUi must error")
+  end},
+
   {"new_bookmark adds a hidden layer and keeps the current layer", function(T)
     local f = doc()
     T.load_plugin(f)
@@ -29,12 +46,22 @@ return {
     T.list_eq(f:names(1), {"Layer 1"})
   end},
 
-  {"search_bookmark wraps around", function(T)
+  {"search_bookmark wraps around and handles 0-page / 1-page docs", function(T)
     local f = doc()
     f.currentPage = 3
     T.load_plugin(f)
     search_bookmark(1)
     T.eq(f.currentPage, 2)
+
+    local empty = Fake.new({pages = {}})
+    T.load_plugin(empty)
+    search_bookmark(1)
+    T.eq(#empty.messages, 0)
+
+    local single = Fake.new({pages = {{layers = {{name = "Bookmark::Only"}}}}})
+    T.load_plugin(single)
+    search_bookmark(1)
+    T.eq(single.currentPage, 1)
   end},
 
   {"search_bookmark reports when there are no bookmarks", function(T)
@@ -43,6 +70,25 @@ return {
     search_bookmark(1)
     T.eq(f.currentPage, 1)
     T.eq(#f.messages, 1)
+  end},
+
+  {"view_bookmarks empty state offers New Bookmark and Import", function(T)
+    local f = Fake.new({pages = {{}}, pdfBackgroundFilename = "/tmp/slides.pdf"})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"New Bookmark…", "Intro", "1", "Jump To"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Intro"})
+    local first_prompt = table.concat(calls[1], "|")
+    T.truthy(first_prompt:find("New Bookmark…", 1, true), first_prompt)
+    T.truthy(first_prompt:find("Import from PDF Outline", 1, true), first_prompt)
+
+    -- Without background PDF, Import option is hidden; cancelling does nothing.
+    local f2 = Fake.new({pages = {{}}})
+    local p2 = T.load_plugin(f2)
+    local calls2 = T.script_dialogs(p2, {false})
+    view_bookmarks()
+    T.eq(#calls2, 1)
+    T.truthy(not table.concat(calls2[1], "|"):find("Import from PDF Outline", 1, true))
   end},
 
   {"view_bookmarks delete removes the layer", function(T)
@@ -54,21 +100,36 @@ return {
     T.eq(f.currentPage, 1)
   end},
 
-  {"view_bookmarks edit renames in place", function(T)
+  {"view_bookmarks Rename uses one dialog and keeps Windows quotes when unchanged", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    T.script_dialogs(platform, {"1", "Edit", "2", "Renamed"})
+    local calls = T.script_dialogs(platform, {"1", "Rename…", "Renamed"})
     view_bookmarks()
+    T.eq(#calls, 4) -- list, action, entry, reopened list
     T.list_eq(f:names(2), {"Layer 1", "Bookmark::Renamed"})
+
+    -- Windows: sanitized pre-fill accepted unchanged keeps original double quotes
+    local fw = Fake.new({pages = {{layers = {{name = "Layer 1"}, {name = 'Bookmark::Say "hi"'}}}}})
+    local pw = T.load_plugin(fw)
+    pw.IS_WINDOWS = true
+    T.script_dialogs(pw, {"1", "Rename…", "Say ''hi''"})
+    view_bookmarks()
+    T.list_eq(fw:names(1), {"Layer 1", 'Bookmark::Say "hi"'})
   end},
 
-  {"view_bookmarks edit moves to another page", function(T)
+  {"view_bookmarks Move to Page validates and moves in one dialog", function(T)
     local f = doc()
     local platform = T.load_plugin(f)
-    T.script_dialogs(platform, {"1", "Edit", "3", "Moved"})
+    T.script_dialogs(platform, {"1", "Move to Page…", "1.5"})
+    view_bookmarks()
+    T.eq(f.messages[#f.messages].error, true)
+    T.list_eq(f:names(2), {"Layer 1", "Bookmark::Two"})
+
+    T.script_dialogs(platform, {"1", "Move to Page…", "3"})
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1"})
-    T.list_eq(f:names(3), {"Layer 1", "Bookmark::Moved"})
+    T.list_eq(f:names(3), {"Layer 1", "Bookmark::Two"})
+    T.eq(f.currentPage, 3)
   end},
 
   {"uses non-deprecated actions on Xournal++ 1.3", function(T)
@@ -80,19 +141,6 @@ return {
     for _, l in ipairs(f.log) do T.truthy(not l:find("^layerAction"), "deprecated call: " .. l) end
     T.truthy(table.concat(f.log, ","):find("activateAction:layer-new-above-current", 1, true))
     T.truthy(table.concat(f.log, ","):find("activateAction:layer-delete", 1, true))
-  end},
-
-  {"falls back to the 1.2 API", function(T)
-    local f = Fake.new({api_version = "1.2", pages = {{layers = {{name = "Layer 1"}}}}, saveAsResult = ""})
-    local platform = T.load_plugin(f)
-    T.eq(app.activateAction, nil)
-    new_bookmark("A")
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::A"})
-    search_bookmark(1)
-    T.eq(#f.messages, 0)
-    platform.find_tool = function(n) return "/usr/bin/" .. n end
-    export_with_bookmarks() -- cancelled save dialog (saveAs returns "")
-    T.eq(f.suggested, os.getenv("HOME") .. "/bookmarks_export.pdf")
   end},
 
   {"new bookmarks are appended on top so same-page order is creation order", function(T)
@@ -110,13 +158,14 @@ return {
     T.eq(#model.collect(s), 0)
   end},
 
-  {"stale layer index never deletes or renames user content", function(T)
+  {"stale or negative layer index never deletes or renames user content", function(T)
     local f = Fake.new({pages = {{layers = {{name = "Layer 1"}, {name = "Bookmark::A"}}}}})
     T.load_plugin(f)
-    local doc = require("bm_doc")
-    doc.delete_bookmark(1, 5)  -- out of range: no error, nothing deleted
-    doc.delete_bookmark(1, 1)  -- not a bookmark layer
-    doc.rename_bookmark(1, 1, "x")
+    local d = require("bm_doc")
+    d.delete_bookmark(1, 5)
+    d.delete_bookmark(1, 1)
+    d.delete_bookmark(1, -1)
+    d.rename_bookmark(1, 1, "x")
     T.list_eq(f:names(1), {"Layer 1", "Bookmark::A"})
   end},
 
@@ -126,21 +175,27 @@ return {
       {layers = {{name = "Bookmark::A"}, {name = "Mine"}, {name = "Bookmark::B"}}, current = 2},
     }, currentPage = 1})
     T.load_plugin(f)
-    local doc = require("bm_doc")
-    doc.delete_bookmark(2, 1)
+    local d = require("bm_doc")
+    d.delete_bookmark(2, 1)
     T.eq(f.currentPage, 1)
     T.eq(f.pages[1].current, 2)
     T.list_eq(f:names(2), {"Mine", "Bookmark::B"})
     T.eq(f.pages[2].current, 1, "selected layer 'Mine' moved down to index 1")
   end},
 
-  {"delete_bookmarks deletes highest index first", function(T)
-    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::B"},
-      {name = "Bookmark::C"}}}}})
+  {"delete_bookmarks batches across pages in one scan and preserves layers", function(T)
+    local f = Fake.new({pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::B"}, {name = "Bookmark::C"}}, current = 1},
+      {layers = {{name = "Bookmark::D"}, {name = "Keep"}}, current = 2},
+    }, currentPage = 1})
     T.load_plugin(f)
-    local doc = require("bm_doc")
-    doc.delete_bookmarks({{page = 1, layer = 2}, {page = 1, layer = 4}})
+    local d = require("bm_doc")
+    d.delete_bookmarks({{page = 1, layer = 2}, {page = 1, layer = 4}, {page = 2, layer = 1}})
+    T.eq(f.structure_calls, 1)
     T.list_eq(f:names(1), {"L", "Bookmark::B"})
+    T.eq(f.pages[1].current, 1)
+    T.list_eq(f:names(2), {"Keep"})
+    T.eq(f.pages[2].current, 1)
   end},
 
   {"layer index errors from Xournal++ are contained", function(T)
@@ -155,13 +210,21 @@ return {
   {"bookmark names never reach zenity --text", function(T)
     local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::a <b> & c"}}}}})
     local platform = T.load_plugin(f)
-    local calls = T.script_dialogs(platform, {"1", "Edit", "1", "x"})
+    local calls = T.script_dialogs(platform, {"1", "Rename…", "x"})
     view_bookmarks()
     for _, argv in ipairs(calls) do
       for _, a in ipairs(argv) do
         T.truthy(not (a:find("^%-%-text=") and a:find("<b>", 1, true)), "name in --text: " .. a)
       end
     end
+  end},
+
+  {"openDialog messages escape Pango markup characters", function(T)
+    local f = doc()
+    T.load_plugin(f)
+    local d = require("bm_doc")
+    d.message("Saved to /tmp/R&D <1>/out.pdf", false)
+    T.eq(f.messages[1].msg, "Saved to /tmp/R&amp;D &lt;1&gt;/out.pdf")
   end},
 
   {"bookmark list on ncruces zenity uses one column", function(T)
@@ -224,25 +287,21 @@ return {
     T.list_eq(f:names(2), {"Layer 1", "Bookmark::## "}, "eff level of '### Deep' after normalization is 2")
   end},
 
-  {"edit keeps the level and can change it", function(T)
+  {"Rename keeps the level and can change it", function(T)
     local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::## B"}}}, {}}})
     local platform = T.load_plugin(f)
-    local calls = T.script_dialogs(platform, {"2", "Edit", "1", "## B renamed"})
+    local calls = T.script_dialogs(platform, {"2", "Rename…", "## B renamed"})
     view_bookmarks()
-    T.eq(calls[4][#calls[4]], "--entry-text=## B", "name dialog shows the level prefix")
+    T.eq(calls[3][#calls[3]], "--entry-text=## B", "name dialog shows the level prefix")
     T.list_eq(f:names(1), {"L", "Bookmark::A", "Bookmark::## B renamed"})
-    T.script_dialogs(platform, {"2", "Edit", "2", "## B renamed"})
-    view_bookmarks()
-    T.list_eq(f:names(2), {"Layer 1", "Bookmark::## B renamed"}, "moved with its level")
   end},
 
-  {"new sub-bookmark is one level below the previous bookmark", function(T)
-    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::Ch"}, {name = "Bookmark::## Sec"}}}, {}}, currentPage = 2})
+  {"Move to Page moves bookmark with its effective level", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "L"}, {name = "Bookmark::A"}, {name = "Bookmark::## B"}}}, {}}})
     local platform = T.load_plugin(f)
-    local calls = T.script_dialogs(platform, {"### Sub"})
-    dialog_new_sub_bookmark()
-    T.eq(calls[1][#calls[1]], "--entry-text=### ")
-    T.list_eq(f:names(2), {"Layer 1", "Bookmark::### Sub"})
+    T.script_dialogs(platform, {"2", "Move to Page…", "2"})
+    view_bookmarks()
+    T.list_eq(f:names(2), {"Layer 1", "Bookmark::## B"})
   end},
 
   {"manager: demote and promote move the whole subtree", function(T)
@@ -256,7 +315,6 @@ return {
     T.list_eq(f:names(1), {"L", "Bookmark::A", "Bookmark::## B", "Bookmark::### B.1"})
     T.list_eq(f:names(2), {"L", "Bookmark::C"}, "following sibling untouched")
     T.eq(#calls, 3, "list shown again after the change")
-    -- the reopened list shows the indentation
     T.truthy(table.concat(calls[3], "|"):find("\u{2003}\u{2003}\u{2003}\u{2003}↳ B.1", 1, true))
 
     T.script_dialogs(platform, {"2", "Promote (one level up, with its sub-bookmarks)"})
@@ -293,27 +351,9 @@ return {
       {layers = {{name = "Bookmark::### A.1.1"}, {name = "L"}, {name = "Bookmark::B"}}},
     }})
     local platform = T.load_plugin(f)
-    local calls = T.script_dialogs(platform, {"1", "Delete", "Delete it with its 2 sub-bookmarks"})
+    T.script_dialogs(platform, {"1", "Delete", "Delete it with its 2 sub-bookmarks"})
     view_bookmarks()
     T.list_eq(f:names(1), {"L"})
     T.list_eq(f:names(2), {"L", "Bookmark::B"})
-  end},
-
-  {"top-level navigation skips sub-bookmarks", function(T)
-    local f = Fake.new({pages = {
-      {layers = {{name = "L"}, {name = "Bookmark::Ch1"}}},
-      {layers = {{name = "L"}, {name = "Bookmark::## 1.1"}}},
-      {layers = {{name = "L"}}},
-      {layers = {{name = "L"}, {name = "Bookmark::Ch2"}}},
-    }})
-    T.load_plugin(f)
-    search_bookmark(2)
-    T.eq(f.currentPage, 4)
-    search_bookmark(2)
-    T.eq(f.currentPage, 1, "wraps around")
-    search_bookmark(1)
-    T.eq(f.currentPage, 2, "plain next still stops at sub-bookmarks")
-    search_bookmark(-2)
-    T.eq(f.currentPage, 1)
   end},
 }

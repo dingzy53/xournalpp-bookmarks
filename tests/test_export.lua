@@ -161,21 +161,35 @@ return {
     T.eq(stripped, "InfoBegin\nInfoKey: Title\nInfoValue: X\nPageMediaBegin\nPageMediaNumber: 1\n")
   end},
 
-  {"export leaves no temporary files and handles non-ASCII destinations", function(T)
+  {"export leaves no temporary files and handles non-ASCII and Pango-special destinations", function(T)
     if not have_pdftk() then return end
     local platform = require("bm_platform")
     local before = temp_snapshot(platform)
     local f, p, src, out = setup(T, {pages = {
       {layers = {{name = "Layer 1"}, {name = "Bookmark::A"}}}, {}, {},
     }})
-    local dest = platform.temp_dir() .. "/bm test ü 日本 's.pdf"
+    local dest = platform.temp_dir() .. "/bm test R&D <1> ü 日本 's.pdf"
     f.saveAsResult = dest
     before[src:match("[^/]+$")] = true
     export_with_bookmarks()
     T.list_eq(outline_of(dest), {"A@1:1"})
     T.list_eq(leftover_temp_files(p, before), {}, "leftover temp files")
+    T.eq(f.messages[#f.messages].error, false)
+    T.truthy(f.messages[#f.messages].msg:find("&amp;", 1, true), f.messages[#f.messages].msg)
     os.remove(dest)
     os.remove(src)
+  end},
+
+  {"export works when fileDialogSave fires asynchronously", function(T)
+    if not have_pdftk() then return end
+    local f, _, src, out = setup(T, {pages = {{layers = {{name = "Bookmark::Async"}}}, {}, {}}})
+    f.async_save = true
+    export_with_bookmarks()
+    T.eq(#f.exported, 0, "export waits for save dialog callback")
+    f.pending_save(out)
+    T.list_eq(outline_of(out), {"Async@1:1"})
+    os.remove(src)
+    os.remove(out)
   end},
 
   {"export reports a failed Xournal++ export", function(T)
@@ -226,15 +240,27 @@ return {
       {pdfPage = 1}, {pdfPage = 0}, {pdfPage = 2}, {pdfPage = 3},
     }})
     T.load_plugin(f)
+    T.eq(f.structure_calls, 0, "fresh doc has 0 calls")
     import_pdf_outline()
     T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
     T.list_eq(f:names(2), {"Layer 1"})
     T.list_eq(f:names(3), {"Layer 1", "Bookmark::## 1.1 日本"})
     T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
+    T.eq(f.structure_calls, 2, "import reads structure once then batches additions")
     T.truthy(f.messages[#f.messages].msg:find("Imported 4 bookmarks", 1, true), f.messages[#f.messages].msg)
 
-    -- importing again asks; "Replace" leaves exactly one copy
+    -- importing again asks; cancelling keeps existing untouched
     local p = require("bm_platform")
+    T.script_dialogs(p, {false})
+    import_pdf_outline()
+    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+
+    -- "Keep existing" appends imported entries
+    T.script_dialogs(p, {"Keep existing bookmarks and add the imported ones"})
+    import_pdf_outline()
+    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro", "Bookmark::Ch 1 & intro"})
+
+    -- "Replace" leaves exactly one copy
     T.script_dialogs(p, {"Replace all existing bookmarks"})
     import_pdf_outline()
     T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})

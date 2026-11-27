@@ -240,4 +240,22 @@ return {
     T.eq(io.open(popen_cmd:match('^""(.*)""$'), "rb"), nil, "batch file removed")
     package.loaded.bm_platform = nil
   end},
+
+  {"needs_temp_copy skips native POSIX paths and copies Windows non-ASCII or Flatpak host", function(T)
+    package.loaded.bm_platform = nil
+    local platform = require("bm_platform")
+    platform.IS_WINDOWS = false
+    platform.IS_FLATPAK = false
+    T.eq(platform.needs_temp_copy("/home/u/日本語.pdf", "pdftk"), false)
+
+    platform.IS_FLATPAK = true
+    platform.locate = function() return {path = "/usr/bin/pdftk", host = true} end
+    T.eq(platform.needs_temp_copy("/home/u/notes.pdf", "pdftk"), true)
+
+    platform.IS_FLATPAK = false
+    platform.IS_WINDOWS = true
+    T.eq(platform.needs_temp_copy("C:\\Users\\u\\notes.pdf", "pdftk"), false)
+    T.eq(platform.needs_temp_copy("C:\\Users\\u\\日本語.pdf", "pdftk"), true)
+    package.loaded.bm_platform = nil
+  end},
 }
