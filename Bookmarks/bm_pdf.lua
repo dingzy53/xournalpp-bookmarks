@@ -99,6 +99,17 @@ function M.write_outline(src, dst, dump, bookmarks, opts)
     return false, "Failed to write temporary metadata file."
   end
   local ok = platform.execute({"pdftk", src, "update_info_utf8", data, "output", dst})
+  if not ok then
+    os.remove(dst)
+    -- Xournal++ 1.3.8 QPDF exports write a direct /Info dictionary that crashes
+    -- pdftk-java update_info_utf8; rewriting with `cat` converts it to an indirect object.
+    local norm = platform.temp_path(".pdf")
+    if platform.execute({"pdftk", src, "cat", "output", norm}) then
+      ok = platform.execute({"pdftk", norm, "update_info_utf8", data, "output", dst})
+    end
+    os.remove(norm)
+    if not ok then os.remove(dst) end
+  end
   os.remove(data)
   if not ok then return false, "Failed to create PDF with bookmarks using pdftk." end
   return true

@@ -6,7 +6,8 @@
 local Fake = require("fake_app")
 
 -- Minimal valid PDF with `n` empty pages and, optionally, an existing outline.
-local function make_pdf(path, n, outline_titles)
+local function make_pdf(path, n, outline_titles, opts)
+  opts = opts or {}
   local objs = {}
   local kids = {}
   objs[1] = "<< /Type /Catalog /Pages 2 0 R" .. (outline_titles and " /Outlines 3 0 R" or "") .. " >>"
@@ -40,7 +41,9 @@ local function make_pdf(path, n, outline_titles)
   local xref = {"xref\n0 " .. (#objs + 1) .. "\n0000000000 65535 f \n"}
   for i = 1, #objs do xref[#xref + 1] = string.format("%010d 00000 n \n", offsets[i]) end
   parts[#parts + 1] = table.concat(xref)
-  parts[#parts + 1] = "trailer\n<< /Size " .. (#objs + 1) .. " /Root 1 0 R >>\nstartxref\n" .. pos .. "\n%%EOF\n"
+  local info = opts.direct_info and " /Info << /Producer (xournalpp 1.3.8 + QPDF) >>" or ""
+  parts[#parts + 1] = "trailer\n<< /Size " .. (#objs + 1) .. " /Root 1 0 R" .. info .. " >>\nstartxref\n" .. pos
+    .. "\n%%EOF\n"
   local f = assert(io.open(path, "wb"))
   f:write(table.concat(parts))
   f:close()
@@ -73,7 +76,7 @@ local function setup(T, opts)
   local platform = require("bm_platform")
   local src = platform.temp_path("_src.pdf")
   local out = platform.temp_path("_out.pdf")
-  make_pdf(src, 3, opts.outline)
+  make_pdf(src, 3, opts.outline, opts)
   local f = Fake.new({pages = opts.pages, saveAsResult = out, xoppFilename = "/home/u/notes.xopp"})
   f.on_export = function(o) copy_file(src, o.outputFile) end
   local p = T.load_plugin(f)
@@ -280,5 +283,23 @@ return {
     T.eq(list[1].title, "A: b")
     T.eq(list[1].level, 2)
     T.eq(list[1].page, 7)
+  end},
+
+  {"export recovers from pdftk direct-/Info trailer (QPDF export)", function(T)
+    if not have_pdftk() then return end
+    local platform = require("bm_platform")
+    local before = temp_snapshot(platform)
+    local f, p, src, out = setup(T, {direct_info = true, pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::Ch 1"}, {name = "Bookmark::## 1.1"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::Ch 2"}}},
+      {},
+    }})
+    before[src:match("[^/]+$")] = true
+    export_with_bookmarks()
+    T.eq(f.messages[#f.messages].error, false, f.messages[#f.messages].msg)
+    T.list_eq(outline_of(out), {"Ch 1@1:1", "1.1@2:1", "Ch 2@1:2"})
+    os.remove(src)
+    os.remove(out)
+    T.list_eq(leftover_temp_files(p, before), {}, "leftover temp files")
   end},
 }
