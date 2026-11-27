@@ -154,6 +154,22 @@ function M.file_size(path)
   return size
 end
 
+function M.read_file(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local s = f:read("*a")
+  f:close()
+  return s
+end
+
+function M.write_file(path, data)
+  local f = io.open(path, "wb")
+  if not f then return false end
+  local ok = f:write(data)
+  local closed = f:close()
+  return (ok ~= nil) and (closed == true or closed == 0)
+end
+
 function M.copy_file(from, to)
   local i = io.open(from, "rb")
   if not i then return false end
@@ -260,6 +276,19 @@ function M.find_tool(name)
   return t and t.path
 end
 
+-- Should `path` be copied to an ASCII / host-visible temp file before passing
+-- it to `tool`? Needed only for non-ASCII paths on Windows or host tools in Flatpak.
+function M.needs_temp_copy(path, tool)
+  if M.IS_WINDOWS and tostring(path or ""):find("[\128-\255]") ~= nil then
+    return true
+  end
+  if M.IS_FLATPAK then
+    local t = M.locate(tool)
+    if t and t.host then return true end
+  end
+  return false
+end
+
 -- How to install a missing tool on this platform.
 function M.install_hint(name)
   local hints
@@ -355,10 +384,7 @@ function M.run(argv)
     return M.exec(command .. " 2>/dev/null")
   end
   local script = M.temp_path(".cmd")
-  local f = io.open(script, "wb")
-  if not f then return nil, false end
-  f:write(M.windows_script(command .. " 2>NUL"))
-  f:close()
+  if not M.write_file(script, M.windows_script(command .. " 2>NUL")) then return nil, false end
   -- io.popen runs `cmd.exe /c <command>`. With more than two quotes cmd.exe
   -- always strips just the outermost pair, so ""<path>"" keeps the path
   -- quoted even when it contains spaces, ( ) or &.

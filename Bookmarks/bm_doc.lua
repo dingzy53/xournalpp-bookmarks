@@ -3,133 +3,189 @@
 -- Copyright (C) 2026 Ding Zheng Yuan (zenity port and later changes)
 -- Modified by Ding Zheng Yuan in 2026; see README.md and the git history.
 --
--- Adapter around the Xournal++ `app` API. Uses current API calls where
--- available (Xournal++ >= 1.3) and falls back to the deprecated ones that
--- are scheduled for removal with the GTK4 port (1.2.x only has those).
-local M = {}
-
-local function action(new_name, old_name)
-  if app.activateAction then
-    app.activateAction(new_name)
-  else
-    app.layerAction(old_name)
-  end
-end
-
--- Insert a new layer above the current one and select it.
-function M.new_layer_above_current()
-  action("layer-new-above-current", "ACTION_NEW_LAYER")
-end
-
--- Delete the current layer.
-function M.delete_current_layer()
-  action("layer-delete", "ACTION_DELETE_LAYER")
-end
-
+-- Adapter around the Xournal++ 1.3+ `app` Lua API.
 local model = require("bm_model")
 
-local function layer_count(structure, page)
-  local info = structure.pages[page]
-  return info and #info.layers or 0
+local M = {}
+
+function M.new_layer_above_current()
+  app.activateAction("layer-new-above-current")
 end
 
--- app.setCurrentLayer raises a Lua error for an out-of-range index, which
--- would abort the whole callback. Clamp to the current page and guard it.
-local function set_layer(id)
-  local s = app.getDocumentStructure()
-  local n = layer_count(s, s.currentPage)
-  if id > n then id = n end
+function M.delete_current_layer()
+  app.activateAction("layer-delete")
+end
+
+local function set_layer_clamped(id, max_layer)
+  if id > max_layer then id = max_layer end
   if id < 0 then id = 0 end
   return pcall(app.setCurrentLayer, id)
 end
 
--- Run fn() on `page` and restore the user's page afterwards. fn receives
--- the layer that was selected on `page` and returns the layer to select
--- there when done (or nil to leave it as fn left it).
-local function on_page(page, fn)
+local function sorted_pages(by_page, descending)
+  local pages = {}
+  for page in pairs(by_page) do pages[#pages + 1] = page end
+  table.sort(pages, descending and function(a, b) return a > b end or nil)
+  return pages
+end
+
+-- Add one or more bookmarks ({page, title, level}) in a single document scan,
+-- preserving each visited page's active layer and the user's current page.
+function M.add_bookmarks(entries)
+  if #entries == 0 then return 0 end
   local s = app.getDocumentStructure()
-  if not s.pages[page] then return false end
-  local origPage = s.currentPage
-  app.setCurrentPage(page)
-  local restore = fn(s.pages[page].currentLayer)
-  if restore then set_layer(restore) end
-  if origPage ~= page then app.setCurrentPage(origPage) end
-  return true
+  local by_page = {}
+  for _, e in ipairs(entries) do
+    if s.pages[e.page] then
+      local bucket = by_page[e.page]
+      if not bucket then
+        bucket = {}
+        by_page[e.page] = bucket
+      end
+      bucket[#bucket + 1] = e
+    end
+  end
+
+  local orig_page = s.currentPage
+  local cur_page = orig_page
+  local added = 0
+  for _, page in ipairs(sorted_pages(by_page, false)) do
+    local info = s.pages[page]
+    local orig_layer = info.currentLayer
+    local list = by_page[page]
+    if cur_page ~= page then
+      app.setCurrentPage(page)
+      cur_page = page
+    end
+    set_layer_clamped(#info.layers, #info.layers)
+    for _, e in ipairs(list) do
+      M.new_layer_above_current()
+      app.setCurrentLayerName(model.layer_name(e.title, e.level))
+      app.setLayerVisibility(false)
+      added = added + 1
+    end
+    set_layer_clamped(orig_layer, #info.layers + #list)
+  end
+  if cur_page ~= orig_page then app.setCurrentPage(orig_page) end
+  return added
 end
 
--- Add a hidden bookmark layer on `page`. It is placed on top of the page's
--- layers, so bookmarks on one page keep the order in which they were
--- created (inserting above the *current* layer made the order depend on
--- which layer happened to be selected).
+-- Add a hidden bookmark layer on top of `page`.
 function M.add_bookmark(page, title, level)
-  return on_page(page, function(current)
-    local s = app.getDocumentStructure()
-    set_layer(layer_count(s, page))
-    M.new_layer_above_current()
-    app.setCurrentLayerName(model.layer_name(title, level))
-    app.setLayerVisibility(false)
-    return current -- below the new layer, so its index is unchanged
-  end)
+  return M.add_bookmarks({{page = page, title = title, level = level}}) > 0
 end
 
--- Select exactly `layer` on the current page, only if it is a bookmark layer.
--- Never clamps: acting on a neighbouring layer would destroy user content.
-local function select_bookmark_layer(page, layer)
-  local info = app.getDocumentStructure().pages[page]
+local function is_bookmark_layer(info, layer)
   local l = info and info.layers[layer]
-  if layer < 1 or not l or not model.title_of(l.name) then return false end
-  return pcall(app.setCurrentLayer, layer)
+  return layer >= 1 and l ~= nil and model.title_of(l.name) ~= nil
+end
+
+-- Rename one or more bookmark layers ({page, layer, title, level}) in one scan.
+function M.rename_bookmarks(edits)
+  if #edits == 0 then return 0 end
+  local s = app.getDocumentStructure()
+  local by_page = {}
+  for _, e in ipairs(edits) do
+    local info = s.pages[e.page]
+    if is_bookmark_layer(info, e.layer) then
+      local bucket = by_page[e.page]
+      if not bucket then
+        bucket = {}
+        by_page[e.page] = bucket
+      end
+      bucket[#bucket + 1] = e
+    end
+  end
+
+  local orig_page = s.currentPage
+  local cur_page = orig_page
+  local renamed = 0
+  for _, page in ipairs(sorted_pages(by_page, false)) do
+    local info = s.pages[page]
+    local orig_layer = info.currentLayer
+    if cur_page ~= page then
+      app.setCurrentPage(page)
+      cur_page = page
+    end
+    for _, e in ipairs(by_page[page]) do
+      if pcall(app.setCurrentLayer, e.layer) then
+        app.setCurrentLayerName(model.layer_name(e.title, e.level))
+        renamed = renamed + 1
+      end
+    end
+    set_layer_clamped(orig_layer, #info.layers)
+  end
+  if cur_page ~= orig_page then app.setCurrentPage(orig_page) end
+  return renamed
 end
 
 function M.rename_bookmark(page, layer, title, level)
-  return on_page(page, function(current)
-    if not select_bookmark_layer(page, layer) then return current end
-    app.setCurrentLayerName(model.layer_name(title, level))
-    return current
-  end)
+  return M.rename_bookmarks({{page = page, layer = layer, title = title, level = level}}) > 0
+end
+
+-- Delete several bookmarks ({page, layer}). Highest (page, layer) first, because
+-- deleting a layer renumbers the layers above it.
+function M.delete_bookmarks(list)
+  if #list == 0 then return false end
+  local s = app.getDocumentStructure()
+  local by_page, seen = {}, {}
+  for _, b in ipairs(list) do
+    local info = s.pages[b.page]
+    local key = b.page .. ":" .. b.layer
+    if not seen[key] and is_bookmark_layer(info, b.layer) then
+      seen[key] = true
+      local bucket = by_page[b.page]
+      if not bucket then
+        bucket = {}
+        by_page[b.page] = bucket
+      end
+      bucket[#bucket + 1] = b.layer
+    end
+  end
+
+  local orig_page = s.currentPage
+  local cur_page = orig_page
+  local deleted = false
+  for _, page in ipairs(sorted_pages(by_page, true)) do
+    local layers = by_page[page]
+    table.sort(layers, function(a, b) return a > b end)
+    local info = s.pages[page]
+    local current = info.currentLayer
+    local remaining = #info.layers
+    if cur_page ~= page then
+      app.setCurrentPage(page)
+      cur_page = page
+    end
+    for _, layer in ipairs(layers) do
+      if pcall(app.setCurrentLayer, layer) then
+        M.delete_current_layer()
+        deleted = true
+        if current >= layer then current = math.max(current - 1, 1) end
+        remaining = math.max(remaining - 1, 1)
+      end
+    end
+    set_layer_clamped(current, remaining)
+  end
+  if cur_page ~= orig_page then app.setCurrentPage(orig_page) end
+  return deleted
 end
 
 function M.delete_bookmark(page, layer)
-  return on_page(page, function(current)
-    if not select_bookmark_layer(page, layer) then return current end
-    M.delete_current_layer()
-    -- layers above the deleted one move down by one
-    if current >= layer then current = math.max(current - 1, 1) end
-    return current
-  end)
+  return M.delete_bookmarks({{page = page, layer = layer}})
 end
 
--- Delete several bookmarks. Highest (page, layer) first, because deleting
--- a layer renumbers the layers above it.
-function M.delete_bookmarks(list)
-  local sorted = {}
-  for i, b in ipairs(list) do sorted[i] = b end
-  table.sort(sorted, function(a, b)
-    if a.page ~= b.page then return a.page > b.page end
-    return a.layer > b.layer
-  end)
-  for _, b in ipairs(sorted) do M.delete_bookmark(b.page, b.layer) end
+-- app.openDialog parses the message as Pango markup.
+function M.escape_markup(s)
+  return (tostring(s or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
 end
 
--- Message box. Falls back to app.msgbox on Xournal++ 1.2.
 function M.message(msg, is_error)
-  if app.openDialog then
-    app.openDialog(msg, {"OK"}, "", is_error or false)
-  elseif app.msgbox then
-    app.msgbox(msg, {[1] = "OK"})
-  end
+  app.openDialog(M.escape_markup(msg), {"OK"}, "", is_error or false)
 end
 
--- "Save as" dialog. Calls the global function named `callback` with the
--- chosen path ("" when cancelled). app.fileDialogSave is asynchronous; the
--- deprecated blocking app.saveAs is used on Xournal++ 1.2.
+-- Async "Save as" dialog; calls global `callback(path)` ("" when cancelled).
 function M.save_dialog(callback, suggested)
-  if app.fileDialogSave then
-    app.fileDialogSave(callback, suggested)
-  else
-    local path = app.saveAs(suggested)
-    _G[callback](path or "")
-  end
+  app.fileDialogSave(callback, suggested)
 end
 
 return M
