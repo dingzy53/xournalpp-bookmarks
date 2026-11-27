@@ -9,7 +9,6 @@ local ui = require("bm_ui")
 local pdf = require("bm_pdf")
 local doc = require("bm_doc")
 
-
 local function show_msg(msg, is_error)
   doc.message(msg, is_error)
 end
@@ -21,42 +20,26 @@ local function need(tool)
   return false
 end
 
-local function edit_bookmark_zenity(title, defaultPage, defaultName, numPages)
-  -- defaultName includes the level prefix ("## Title")
-  local newPageStr = ui.entry(title, "Page Number (1-" .. numPages .. "):", tostring(defaultPage))
-  if newPageStr == nil then return nil end -- Cancelled
-
-  local newPage = tonumber(newPageStr)
-  if not newPage or newPage < 1 or newPage > numPages then
-    show_msg("Invalid page number. Edit cancelled.", true)
-    return nil
-  end
-
-  local newName = ui.entry(title, "Bookmark name (\"## Name\" = level 2, \"### Name\" = level 3):",
-    defaultName)
-  if newName == nil then return nil end -- Cancelled
-  -- Characters that cannot be passed to zenity are replaced in the pre-filled
-  -- text; keep the original name when the user did not change it.
-  if newName == platform.sanitize_arg(defaultName) then newName = defaultName end
-
-  return newPage, newName
-end
-
 --------------------------------------------------------------------------------
 -- Public Plugin Callbacks (Registered with Xournal++)
 --------------------------------------------------------------------------------
 
 function initUi()
-  app.registerUi({menu="Previous Bookmark", toolbarId="CUSTOM_PREVIOUS_BOOKMARK", callback="search_bookmark", mode=-1, iconName="go-previous"})
-  app.registerUi({menu="New Bookmark", toolbarId="CUSTOM_NEW_BOOKMARK", callback="dialog_new_bookmark", iconName="bookmark-new-symbolic"})
-  app.registerUi({menu="New Sub-Bookmark", toolbarId="CUSTOM_NEW_SUB_BOOKMARK", callback="dialog_new_sub_bookmark", iconName="format-indent-more-symbolic"})
-  app.registerUi({menu="New Bookmark (No dialog)", toolbarId="CUSTOM_NEW_BOOKMARK_NO_DIALOG", callback="new_bookmark", iconName="bookmark-new-symbolic"})
-  app.registerUi({menu="Next Bookmark", toolbarId="CUSTOM_NEXT_BOOKMARK", callback="search_bookmark", mode=1, iconName="go-next"})
-  app.registerUi({menu="Previous Top-Level Bookmark", toolbarId="CUSTOM_PREVIOUS_TOP_BOOKMARK", callback="search_bookmark", mode=-2, iconName="go-first"})
-  app.registerUi({menu="Next Top-Level Bookmark", toolbarId="CUSTOM_NEXT_TOP_BOOKMARK", callback="search_bookmark", mode=2, iconName="go-last"})
-  app.registerUi({menu="View Bookmarks", toolbarId="CUSTOM_VIEW_BOOKMARKS", callback="view_bookmarks", iconName="user-bookmarks-symbolic"})
-  app.registerUi({menu="Import Bookmarks from PDF Outline", toolbarId="CUSTOM_IMPORT_PDF_OUTLINE", callback="import_pdf_outline", iconName="document-import"})
-  app.registerUi({menu="Export to PDF with Bookmarks", toolbarId="CUSTOM_EXPORT_WITH_BOOKMARKS", callback="export_with_bookmarks", iconName="xopp-document-export-pdf"})
+  local parent = {"Bookmarks"}
+  app.registerUi({menu = "Bookmarks: New…", parentPath = parent, toolbarId = "CUSTOM_NEW_BOOKMARK",
+    callback = "dialog_new_bookmark", iconName = "bookmark-new-symbolic"})
+  app.registerUi({menu = "Bookmarks: Quick Add", parentPath = parent, toolbarId = "CUSTOM_NEW_BOOKMARK_NO_DIALOG",
+    callback = "new_bookmark", iconName = "bookmark-new-symbolic"})
+  app.registerUi({menu = "Bookmarks: Manage…", parentPath = parent, toolbarId = "CUSTOM_VIEW_BOOKMARKS",
+    callback = "view_bookmarks", iconName = "user-bookmarks-symbolic"})
+  app.registerUi({menu = "Bookmarks: Previous", parentPath = parent, toolbarId = "CUSTOM_PREVIOUS_BOOKMARK",
+    callback = "search_bookmark", mode = -1, iconName = "go-previous"})
+  app.registerUi({menu = "Bookmarks: Next", parentPath = parent, toolbarId = "CUSTOM_NEXT_BOOKMARK",
+    callback = "search_bookmark", mode = 1, iconName = "go-next"})
+  app.registerUi({menu = "Bookmarks: Import PDF Outline", parentPath = parent, toolbarId = "CUSTOM_IMPORT_PDF_OUTLINE",
+    callback = "import_pdf_outline", iconName = "document-import"})
+  app.registerUi({menu = "Bookmarks: Export PDF…", parentPath = parent, toolbarId = "CUSTOM_EXPORT_WITH_BOOKMARKS",
+    callback = "export_with_bookmarks", iconName = "xopp-document-export-pdf"})
 end
 
 -- Clean a name typed by the user and split off its "## " level prefix.
@@ -73,7 +56,7 @@ local function sibling_level()
   return model.previous_level(model.collect(structure), structure.currentPage) or 1
 end
 
--- "New Bookmark (No dialog)": an untitled sibling of the previous bookmark.
+-- "Bookmarks: Quick Add": an untitled sibling of the previous bookmark.
 function new_bookmark(name)
   local page = app.getDocumentStructure().currentPage
   if type(name) == "string" and name ~= "" then
@@ -84,41 +67,26 @@ function new_bookmark(name)
   end
 end
 
-local function dialog_add(level, heading)
+function dialog_new_bookmark()
   if not need("zenity") then return end
-  local text = ui.entry(heading,
-    "Bookmark name (\"## Name\" = level 2, \"### Name\" = level 3):", model.level_prefix(level))
+  local text = ui.entry("New Bookmark",
+    "Bookmark name (\"## Name\" = level 2, \"### Name\" = level 3):", model.level_prefix(sibling_level()))
   if text == nil then return end -- Cancelled
   local lvl, title = parse_input(text)
   doc.add_bookmark(app.getDocumentStructure().currentPage, title, lvl)
 end
 
--- "New Bookmark": the dialog is pre-filled with the previous bookmark's
--- level prefix, so pressing Enter after typing a name creates a sibling.
-function dialog_new_bookmark()
-  dialog_add(sibling_level(), "New Bookmark")
-end
-
--- "New Sub-Bookmark": one level below the bookmark it follows.
-function dialog_new_sub_bookmark()
-  local structure = app.getDocumentStructure()
-  local prev = model.previous_level(model.collect(structure), structure.currentPage)
-  dialog_add(model.clamp_level((prev or 0) + 1), "New Sub-Bookmark")
-end
-
 -- mode = -1 / 1: previous / next page with a bookmark.
--- mode = -2 / 2: previous / next page with a top-level (level 1) bookmark.
 function search_bookmark(mode)
   local structure = app.getDocumentStructure()
   local numPages = #structure.pages
   if numPages == 0 then return end
   mode = mode or 1
   local step = mode < 0 and -1 or 1
-  local top_only = math.abs(mode) == 2
 
   local has_bookmark = {}
   for _, b in ipairs(model.collect(structure)) do
-    if not top_only or b.eff == 1 then has_bookmark[b.page] = true end
+    has_bookmark[b.page] = true
   end
 
   local currentPage = structure.currentPage
@@ -135,7 +103,7 @@ function search_bookmark(mode)
   until page == currentPage
 
   if nextBookmark == nil then
-    show_msg(top_only and "No top-level bookmark found." or "No bookmark found.", false)
+    show_msg("No bookmark found.", false)
     return
   end
 
@@ -144,17 +112,20 @@ function search_bookmark(mode)
 end
 
 local ACTION_JUMP = "Jump To"
-local ACTION_EDIT = "Edit"
+local ACTION_RENAME = "Rename…"
+local ACTION_MOVE = "Move to Page…"
 local ACTION_PROMOTE = "Promote (one level up, with its sub-bookmarks)"
 local ACTION_DEMOTE = "Demote (one level down, with its sub-bookmarks)"
 local ACTION_DELETE = "Delete"
 
 -- Change the level of list[i] and its sub-bookmarks by `delta`.
 local function shift_subtree(list, i, delta)
+  local edits = {}
   for j = i, model.subtree_end(list, i) do
     local b = list[j]
-    doc.rename_bookmark(b.page, b.layer, b.title, b.eff + delta)
+    edits[#edits + 1] = {page = b.page, layer = b.layer, title = b.title, level = b.eff + delta}
   end
+  doc.rename_bookmarks(edits)
 end
 
 local function delete_with_choice(list, i)
@@ -172,10 +143,12 @@ local function delete_with_choice(list, i)
     "Delete", choices)
   if c == 1 then
     -- renaming keeps layer indices, so do it before deleting
+    local edits = {}
     for j = i + 1, last do
       local b = list[j]
-      doc.rename_bookmark(b.page, b.layer, b.title, b.eff - 1)
+      edits[#edits + 1] = {page = b.page, layer = b.layer, title = b.title, level = b.eff - 1}
     end
+    doc.rename_bookmarks(edits)
     doc.delete_bookmark(list[i].page, list[i].layer)
   elseif c == 2 then
     local doomed = {}
@@ -184,25 +157,36 @@ local function delete_with_choice(list, i)
   end
 end
 
-local function edit_bookmark(selected, numPages)
-  local newPage, newText = edit_bookmark_zenity("Edit Bookmark", selected.page,
-    model.format_title(selected.eff, selected.title), numPages)
-  if newPage == nil then return end
-  local newLevel, newName = parse_input(newText)
-  if selected.page == newPage then
-    doc.rename_bookmark(selected.page, selected.layer, newName, newLevel)
-  else
-    doc.delete_bookmark(selected.page, selected.layer)
-    doc.add_bookmark(newPage, newName, newLevel)
-    app.setCurrentPage(newPage)
-    app.scrollToPage(newPage)
+local function rename_bookmark_dialog(b)
+  local defaultName = model.format_title(b.eff, b.title)
+  local newName = ui.entry("Rename Bookmark",
+    "Bookmark name (\"## Name\" = level 2, \"### Name\" = level 3):", defaultName)
+  if newName == nil then return end
+  -- Keep characters stripped by Windows quoting when the user leaves the name unchanged.
+  if newName == platform.sanitize_arg(defaultName) then newName = defaultName end
+  local newLevel, title = parse_input(newName)
+  doc.rename_bookmark(b.page, b.layer, title, newLevel)
+end
+
+local function move_bookmark_dialog(b, numPages)
+  local newPageStr = ui.entry("Move Bookmark", "Page Number (1-" .. numPages .. "):", tostring(b.page))
+  if newPageStr == nil then return end
+  local newPage = tonumber(newPageStr)
+  if not newPage or newPage ~= math.floor(newPage) or newPage < 1 or newPage > numPages then
+    show_msg("Invalid page number. Move cancelled.", true)
+    return
   end
+  if newPage == b.page then return end
+  doc.delete_bookmark(b.page, b.layer)
+  doc.add_bookmark(newPage, b.title, b.eff)
+  app.setCurrentPage(newPage)
+  app.scrollToPage(newPage)
 end
 
 -- Ask what to do with list[i]. Returns true when the manager should close.
 local function manage_bookmark(list, i, numPages)
   local b = list[i]
-  local actions = {ACTION_JUMP, ACTION_EDIT}
+  local actions = {ACTION_JUMP, ACTION_RENAME, ACTION_MOVE}
   if model.can_promote(list, i) then actions[#actions + 1] = ACTION_PROMOTE end
   if model.can_demote(list, i) then actions[#actions + 1] = ACTION_DEMOTE end
   actions[#actions + 1] = ACTION_DELETE
@@ -218,8 +202,10 @@ local function manage_bookmark(list, i, numPages)
     app.setCurrentPage(b.page)
     app.scrollToPage(b.page)
     return true
-  elseif action == ACTION_EDIT then
-    edit_bookmark(b, numPages)
+  elseif action == ACTION_RENAME then
+    rename_bookmark_dialog(b)
+  elseif action == ACTION_MOVE then
+    move_bookmark_dialog(b, numPages)
   elseif action == ACTION_PROMOTE then
     shift_subtree(list, i, -1)
   elseif action == ACTION_DEMOTE then
@@ -243,34 +229,42 @@ function view_bookmarks()
     end
     local bookmarks = model.collect(structure)
     if #bookmarks == 0 then
-      if first then show_msg("No bookmarks exist in this document.", false) end
-      return
-    end
-    if first and not need("zenity") then return end
-    first = false
+      if not first or not need("zenity") then return end
+      first = false
+      local choices = {"New Bookmark…"}
+      if structure.pdfBackgroundFilename and structure.pdfBackgroundFilename ~= "" then
+        choices[2] = "Import from PDF Outline"
+      end
+      local c = ui.choose("Bookmark Manager", "This document has no bookmarks yet.", "Action", choices)
+      if c == 1 then
+        dialog_new_bookmark()
+      elseif c == 2 then
+        import_pdf_outline()
+        return
+      else
+        return
+      end
+    else
+      if first and not need("zenity") then return end
+      first = false
 
-    local rows = {}
-    for i, b in ipairs(bookmarks) do
-      rows[i] = {"Page " .. b.page, model.outline_label(b)}
-    end
-    local idx = ui.choose_rows("Bookmark Manager", "Select a bookmark to manage:", {"Page", "Bookmark"}, rows,
-      {width = 600, height = 500})
-    if not idx or not bookmarks[idx] then return end -- Closed
+      local rows = {}
+      for i, b in ipairs(bookmarks) do
+        rows[i] = {"Page " .. b.page, model.outline_label(b)}
+      end
+      local idx = ui.choose_rows("Bookmark Manager", "Select a bookmark to manage:", {"Page", "Bookmark"}, rows,
+        {width = 600, height = 500})
+      if not idx or not bookmarks[idx] then return end -- Closed
 
-    if manage_bookmark(bookmarks, idx, numPages) then return end
+      if manage_bookmark(bookmarks, idx, numPages) then return end
+    end
   end
-end
-
--- Backward compatibility alias in case old UI / shortcuts reference "export"
-function export()
-  export_with_bookmarks()
 end
 
 function export_with_bookmarks()
   if not need("pdftk") then return end
 
   local structure = app.getDocumentStructure()
-
   local defaultName = platform.default_export_path(structure.xoppFilename, structure.pdfBackgroundFilename)
   doc.save_dialog("bookmarks_export_to", defaultName)
 end
@@ -283,7 +277,8 @@ function bookmarks_export_to(path)
   -- Export the base PDF from Xournal++ into a temporary file
   local tempPdf = platform.temp_path(".pdf")
   app.export({outputFile = tempPdf})
-  if not platform.file_size(tempPdf) or platform.file_size(tempPdf) == 0 then
+  local size = platform.file_size(tempPdf)
+  if not size or size == 0 then
     os.remove(tempPdf)
     show_msg("Xournal++ could not export the document to PDF.", true)
     return
@@ -343,12 +338,17 @@ function import_pdf_outline()
   end
   if not need("pdftk") then return end
 
-  -- Read a copy in the temp folder: its plain-ASCII path is safe for pdftk
-  -- on Windows and visible to the host's pdftk in Flatpak.
-  local copy = platform.temp_path(".pdf")
-  local source = platform.copy_file(background, copy) and copy or background
+  -- Copy only when pdftk may not reach the original path (Windows non-ASCII or Flatpak host).
+  local source, temp_copy = background, nil
+  if platform.needs_temp_copy(background, "pdftk") then
+    local candidate = platform.temp_path(".pdf")
+    if platform.copy_file(background, candidate) then
+      temp_copy = candidate
+      source = candidate
+    end
+  end
   local dump, err = pdf.read_dump(source)
-  os.remove(copy)
+  if temp_copy then os.remove(temp_copy) end
   if not dump then
     show_msg(err, true)
     return
@@ -377,16 +377,16 @@ function import_pdf_outline()
     if c == 1 then doc.delete_bookmarks(existing) end
   end
 
-  local imported, skipped = 0, 0
+  local to_add, skipped = {}, 0
   for _, e in ipairs(entries) do
     local page = page_of[e.page]
     if page then
-      doc.add_bookmark(page, e.title, model.clamp_level(e.level))
-      imported = imported + 1
+      to_add[#to_add + 1] = {page = page, title = e.title, level = model.clamp_level(e.level)}
     else
       skipped = skipped + 1
     end
   end
+  local imported = doc.add_bookmarks(to_add)
 
   local msg = string.format("Imported %d bookmark%s from the PDF outline.", imported, imported == 1 and "" or "s")
   if skipped > 0 then
