@@ -1,8 +1,8 @@
 -- Licensed under the GNU General Public License v2 (GPLv2); see LICENSE.
 -- Copyright (C) 2026 Ding Zheng Yuan
 --
--- In-memory stand-in for the Xournal++ `app` Lua API, modelled on
--- src/core/plugin/luapi_application.h and LayerController/XojPage semantics.
+-- In-memory stand-in for the Xournal++ 1.3+ `app` Lua API, modelled on
+-- src/core/plugin/luapi_application.h and Plugin.cpp.
 local Fake = {}
 Fake.__index = Fake
 
@@ -14,7 +14,7 @@ function Fake.new(opts)
   for i, p in ipairs(opts.pages or {{}}) do
     local layers = {}
     for j, l in ipairs(p.layers or {{name = "Layer 1"}}) do
-      layers[j] = {name = l.name or ("Layer " .. j), visible = l.visible ~= false}
+      layers[j] = {name = l.name or ("Layer " .. j), visible = l.visible ~= false, annotated = l.annotated == true}
     end
     self.pages[i] = {layers = layers, current = p.current or #layers, pdfPage = p.pdfPage or 0}
   end
@@ -23,13 +23,25 @@ function Fake.new(opts)
   self.pdfBackgroundFilename = opts.pdfBackgroundFilename or ""
   self.log = {}
   self.messages = {}
+  self.registered = {}
+  self.in_init_ui = false
+  self.structure_calls = 0
   self.saveAsResult = opts.saveAsResult
+  self.async_save = opts.async_save or false
+  self.pending_save = nil
   self.exported = {}
-  self.api_version = opts.api_version or "1.3"
   return self
 end
 
 function Fake:page() return self.pages[self.currentPage] end
+
+-- Simulate Xournal++'s initUi() call window.
+function Fake:run_init_ui()
+  self.in_init_ui = true
+  local ok, err = pcall(_G.initUi)
+  self.in_init_ui = false
+  if not ok then error(err, 2) end
+end
 
 -- Build the `app` table bound to this fake document.
 function Fake:install()
@@ -37,11 +49,12 @@ function Fake:install()
   local app = {}
 
   function app.getDocumentStructure()
+    s.structure_calls = s.structure_calls + 1
     local pages = {}
     for i, p in ipairs(s.pages) do
       local layers = {[0] = {isVisible = true, name = "Background"}}
       for j, l in ipairs(p.layers) do
-        layers[j] = {name = l.name, isVisible = l.visible, isAnnotated = false}
+        layers[j] = {name = l.name, isVisible = l.visible, isAnnotated = l.annotated == true}
       end
       pages[i] = {layers = layers, currentLayer = p.current, pdfBackgroundPageNo = p.pdfPage}
     end
@@ -59,7 +72,7 @@ function Fake:install()
 
   function app.setCurrentLayer(id)
     local p = s:page()
-    if id > #p.layers then error("No layer with layer ID " .. id) end
+    if id < 0 or id > #p.layers then error("No layer with layer ID " .. id) end
     p.current = id
   end
 
@@ -76,7 +89,15 @@ function Fake:install()
   local function new_layer_above()
     local p = s:page()
     local pos = p.current -- insert after current (0-based index == current id)
-    table.insert(p.layers, pos + 1, {name = "", visible = true})
+    table.insert(p.layers, pos + 1, {name = "", visible = true, annotated = false})
+    p.current = pos + 1
+  end
+
+  local function new_layer_below()
+    local p = s:page()
+    local pos = p.current - 1 -- insert before current (0-based index)
+    if pos < 0 then error("layer-new-below-current requires non-background layer") end
+    table.insert(p.layers, pos + 1, {name = "", visible = true, annotated = false})
     p.current = pos + 1
   end
 
@@ -84,44 +105,34 @@ function Fake:install()
     local p = s:page()
     if p.current == 0 then return end
     table.remove(p.layers, p.current)
-    if #p.layers == 0 then p.layers[1] = {name = "", visible = true} end
+    if #p.layers == 0 then p.layers[1] = {name = "", visible = true, annotated = false} end
     p.current = #p.layers -- XojPage::removeLayer resets to npos == top layer
   end
 
-  function app.layerAction(a)
-    table.insert(s.log, "layerAction:" .. a)
-    if a == "ACTION_NEW_LAYER" then new_layer_above()
-    elseif a == "ACTION_DELETE_LAYER" then delete_current_layer()
-    else error("unknown layer action " .. a) end
+  function app.activateAction(a)
+    table.insert(s.log, "activateAction:" .. a)
+    if a == "layer-new-above-current" then new_layer_above()
+    elseif a == "layer-new-below-current" then new_layer_below()
+    elseif a == "layer-delete" then delete_current_layer()
+    else error("unknown action " .. a) end
   end
 
-  if s.api_version ~= "1.2" then
-    function app.activateAction(a)
-      table.insert(s.log, "activateAction:" .. a)
-      if a == "layer-new-above-current" then new_layer_above()
-      elseif a == "layer-delete" then delete_current_layer()
-      else error("unknown action " .. a) end
-    end
-
-    function app.openDialog(msg, buttons, cb, isError)
-      table.insert(s.messages, {msg = msg, error = isError})
-    end
-
-    function app.fileDialogSave(cb, suggested)
-      s.suggested = suggested
-      _G[cb](s.saveAsResult or "")
-    end
-
-    function app.getFolder(kind)
-      return s.folder or os.getenv("TMPDIR") or "/tmp"
-    end
-  else
-    function app.msgbox(msg) table.insert(s.messages, {msg = msg}) end
+  function app.openDialog(msg, buttons, cb, isError)
+    table.insert(s.messages, {msg = tostring(msg or ""), error = isError})
   end
 
-  function app.saveAs(suggested)
+  function app.fileDialogSave(cb, suggested)
     s.suggested = suggested
-    return s.saveAsResult
+    local function finish(path) _G[cb](path or "") end
+    if s.async_save then
+      s.pending_save = finish
+    else
+      finish(s.saveAsResult)
+    end
+  end
+
+  function app.getFolder(kind)
+    return s.folder or os.getenv("TMPDIR") or "/tmp"
   end
 
   function app.export(opts)
@@ -135,13 +146,22 @@ function Fake:install()
     return nil, err
   end
 
-  function app.registerUi(opts) end
+  function app.registerUi(opts)
+    if not s.in_init_ui then
+      error("registerUi needs to be called within initUi()")
+    end
+    if type(opts) ~= "table" or type(opts.callback) ~= "string" or opts.callback == "" then
+      error("Missing callback function!")
+    end
+    table.insert(s.registered, opts)
+    return {menuId = #s.registered}
+  end
 
   _G.app = app
   return app
 end
 
--- Convenience: list of bookmark layer names on a page.
+-- Convenience: list of layer names on a page.
 function Fake:names(page)
   local out = {}
   for i, l in ipairs(self.pages[page].layers) do out[i] = l.name end

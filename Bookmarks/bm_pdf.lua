@@ -29,27 +29,11 @@ function M.bookmark_records(bookmarks)
   return table.concat(out)
 end
 
-local function read_file(path)
-  local f = io.open(path, "rb")
-  if not f then return nil end
-  local s = f:read("*a")
-  f:close()
-  return s
-end
-
-local function write_file(path, data)
-  local f = io.open(path, "wb")
-  if not f then return false end
-  f:write(data)
-  f:close()
-  return true
-end
-
 -- Read pdftk's metadata dump of `pdf`. Returns the text or nil, error.
 function M.read_dump(pdf)
   local data = platform.temp_path(".txt")
   local ok = platform.execute({"pdftk", pdf, "dump_data_utf8", "output", data})
-  local dump = ok and read_file(data)
+  local dump = ok and platform.read_file(data)
   os.remove(data)
   if not dump then return nil, "Failed to read PDF metadata with pdftk." end
   return dump
@@ -110,11 +94,22 @@ function M.write_outline(src, dst, dump, bookmarks, opts)
   opts = opts or {}
   if not opts.keep_existing then dump = M.strip_outline(dump) end
   local data = platform.temp_path(".txt")
-  if not write_file(data, dump .. M.bookmark_records(bookmarks)) then
+  if not platform.write_file(data, dump .. M.bookmark_records(bookmarks)) then
     os.remove(data)
     return false, "Failed to write temporary metadata file."
   end
   local ok = platform.execute({"pdftk", src, "update_info_utf8", data, "output", dst})
+  if not ok then
+    os.remove(dst)
+    -- Xournal++ 1.3.8 QPDF exports write a direct /Info dictionary that crashes
+    -- pdftk-java update_info_utf8; rewriting with `cat` converts it to an indirect object.
+    local norm = platform.temp_path(".pdf")
+    if platform.execute({"pdftk", src, "cat", "output", norm}) then
+      ok = platform.execute({"pdftk", norm, "update_info_utf8", data, "output", dst})
+    end
+    os.remove(norm)
+    if not ok then os.remove(dst) end
+  end
   os.remove(data)
   if not ok then return false, "Failed to create PDF with bookmarks using pdftk." end
   return true

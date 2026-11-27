@@ -154,6 +154,22 @@ function M.file_size(path)
   return size
 end
 
+function M.read_file(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local s = f:read("*a")
+  f:close()
+  return s
+end
+
+function M.write_file(path, data)
+  local f = io.open(path, "wb")
+  if not f then return false end
+  local ok = f:write(data)
+  local closed = f:close()
+  return (ok ~= nil) and (closed == true or closed == 0)
+end
+
 function M.copy_file(from, to)
   local i = io.open(from, "rb")
   if not i then return false end
@@ -260,6 +276,19 @@ function M.find_tool(name)
   return t and t.path
 end
 
+-- Should `path` be copied to an ASCII / host-visible temp file before passing
+-- it to `tool`? Needed only for non-ASCII paths on Windows or host tools in Flatpak.
+function M.needs_temp_copy(path, tool)
+  if M.IS_WINDOWS and tostring(path or ""):find("[\128-\255]") ~= nil then
+    return true
+  end
+  if M.IS_FLATPAK then
+    local t = M.locate(tool)
+    if t and t.host then return true end
+  end
+  return false
+end
+
 -- How to install a missing tool on this platform.
 function M.install_hint(name)
   local hints
@@ -270,7 +299,7 @@ function M.install_hint(name)
     }
   elseif M.is_mac() then
     hints = {
-      zenity = "brew install zenity   (or: brew install ncruces/tap/zenity)",
+      zenity = "brew install zenity",
       pdftk = "brew install pdftk-java   (or without Xcode: brew install --cask temurin + pdftk-all.jar; see README)",
     }
   else
@@ -355,10 +384,7 @@ function M.run(argv)
     return M.exec(command .. " 2>/dev/null")
   end
   local script = M.temp_path(".cmd")
-  local f = io.open(script, "wb")
-  if not f then return nil, false end
-  f:write(M.windows_script(command .. " 2>NUL"))
-  f:close()
+  if not M.write_file(script, M.windows_script(command .. " 2>NUL")) then return nil, false end
   -- io.popen runs `cmd.exe /c <command>`. With more than two quotes cmd.exe
   -- always strips just the outermost pair, so ""<path>"" keeps the path
   -- quoted even when it contains spaces, ( ) or &.
@@ -369,8 +395,15 @@ end
 
 -- Run a zenity dialog. Returns the output without line breaks, or nil when
 -- the dialog was cancelled or failed.
+-- On macOS, ncruces/zenity defaults to --modal=true and attaches JXA dialogs
+-- to Xournal++'s PID while Xournal++ is blocked in io.popen (deadlock).
 function M.run_zenity(argv)
-  local result, success = M.run(argv)
+  local call = argv
+  if argv[1] == "zenity" and M.is_mac() and M.zenity_flavor() == "ncruces" then
+    call = {"zenity", "--modal=false"}
+    for i = 2, #argv do call[#call + 1] = argv[i] end
+  end
+  local result, success = M.run(call)
   if not result or not success then return nil end
   -- Strip both \r and \n so Windows CRLF does not break string equality comparisons
   return (result:gsub("[\r\n]", ""))

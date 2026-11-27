@@ -6,7 +6,8 @@
 local Fake = require("fake_app")
 
 -- Minimal valid PDF with `n` empty pages and, optionally, an existing outline.
-local function make_pdf(path, n, outline_titles)
+local function make_pdf(path, n, outline_titles, opts)
+  opts = opts or {}
   local objs = {}
   local kids = {}
   objs[1] = "<< /Type /Catalog /Pages 2 0 R" .. (outline_titles and " /Outlines 3 0 R" or "") .. " >>"
@@ -40,7 +41,9 @@ local function make_pdf(path, n, outline_titles)
   local xref = {"xref\n0 " .. (#objs + 1) .. "\n0000000000 65535 f \n"}
   for i = 1, #objs do xref[#xref + 1] = string.format("%010d 00000 n \n", offsets[i]) end
   parts[#parts + 1] = table.concat(xref)
-  parts[#parts + 1] = "trailer\n<< /Size " .. (#objs + 1) .. " /Root 1 0 R >>\nstartxref\n" .. pos .. "\n%%EOF\n"
+  local info = opts.direct_info and " /Info << /Producer (xournalpp 1.3.8 + QPDF) >>" or ""
+  parts[#parts + 1] = "trailer\n<< /Size " .. (#objs + 1) .. " /Root 1 0 R" .. info .. " >>\nstartxref\n" .. pos
+    .. "\n%%EOF\n"
   local f = assert(io.open(path, "wb"))
   f:write(table.concat(parts))
   f:close()
@@ -73,7 +76,7 @@ local function setup(T, opts)
   local platform = require("bm_platform")
   local src = platform.temp_path("_src.pdf")
   local out = platform.temp_path("_out.pdf")
-  make_pdf(src, 3, opts.outline)
+  make_pdf(src, 3, opts.outline, opts)
   local f = Fake.new({pages = opts.pages, saveAsResult = out, xoppFilename = "/home/u/notes.xopp"})
   f.on_export = function(o) copy_file(src, o.outputFile) end
   local p = T.load_plugin(f)
@@ -161,21 +164,36 @@ return {
     T.eq(stripped, "InfoBegin\nInfoKey: Title\nInfoValue: X\nPageMediaBegin\nPageMediaNumber: 1\n")
   end},
 
-  {"export leaves no temporary files and handles non-ASCII destinations", function(T)
+  {"export leaves no temporary files and handles non-ASCII and Pango-special destinations", function(T)
     if not have_pdftk() then return end
     local platform = require("bm_platform")
     local before = temp_snapshot(platform)
     local f, p, src, out = setup(T, {pages = {
       {layers = {{name = "Layer 1"}, {name = "Bookmark::A"}}}, {}, {},
     }})
-    local dest = platform.temp_dir() .. "/bm test ü 日本 's.pdf"
+    local dest = platform.temp_dir() .. "/bm test R&D <1> ü 日本 's.pdf"
     f.saveAsResult = dest
     before[src:match("[^/]+$")] = true
     export_with_bookmarks()
     T.list_eq(outline_of(dest), {"A@1:1"})
     T.list_eq(leftover_temp_files(p, before), {}, "leftover temp files")
+    T.eq(f.messages[#f.messages].error, false)
+    T.truthy(f.messages[#f.messages].msg:find("R&D <1>", 1, true), f.messages[#f.messages].msg)
+    T.truthy(not f.messages[#f.messages].msg:find("&amp;", 1, true), f.messages[#f.messages].msg)
     os.remove(dest)
     os.remove(src)
+  end},
+
+  {"export works when fileDialogSave fires asynchronously", function(T)
+    if not have_pdftk() then return end
+    local f, _, src, out = setup(T, {pages = {{layers = {{name = "Bookmark::Async"}}}, {}, {}}})
+    f.async_save = true
+    export_with_bookmarks()
+    T.eq(#f.exported, 0, "export waits for save dialog callback")
+    f.pending_save(out)
+    T.list_eq(outline_of(out), {"Async@1:1"})
+    os.remove(src)
+    os.remove(out)
   end},
 
   {"export reports a failed Xournal++ export", function(T)
@@ -226,19 +244,31 @@ return {
       {pdfPage = 1}, {pdfPage = 0}, {pdfPage = 2}, {pdfPage = 3},
     }})
     T.load_plugin(f)
+    T.eq(f.structure_calls, 0, "fresh doc has 0 calls")
     import_pdf_outline()
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Layer 1"})
     T.list_eq(f:names(2), {"Layer 1"})
-    T.list_eq(f:names(3), {"Layer 1", "Bookmark::## 1.1 日本"})
-    T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
+    T.list_eq(f:names(3), {"Bookmark::## 1.1 日本", "Layer 1"})
+    T.list_eq(f:names(4), {"Bookmark::### 1.1.1", "Bookmark::Ch 2", "Layer 1"})
+    T.eq(f.structure_calls, 2, "import reads structure once then batches additions")
     T.truthy(f.messages[#f.messages].msg:find("Imported 4 bookmarks", 1, true), f.messages[#f.messages].msg)
 
-    -- importing again asks; "Replace" leaves exactly one copy
+    -- importing again asks; cancelling keeps existing untouched
     local p = require("bm_platform")
+    T.script_dialogs(p, {false})
+    import_pdf_outline()
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Layer 1"})
+
+    -- "Keep existing" appends imported entries
+    T.script_dialogs(p, {"Keep existing bookmarks and add the imported ones"})
+    import_pdf_outline()
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Bookmark::Ch 1 & intro", "Layer 1"})
+
+    -- "Replace" leaves exactly one copy
     T.script_dialogs(p, {"Replace all existing bookmarks"})
     import_pdf_outline()
-    T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(4), {"Bookmark::### 1.1.1", "Bookmark::Ch 2", "Layer 1"})
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Layer 1"})
     os.remove(bg)
   end},
 
@@ -254,5 +284,23 @@ return {
     T.eq(list[1].title, "A: b")
     T.eq(list[1].level, 2)
     T.eq(list[1].page, 7)
+  end},
+
+  {"export recovers from pdftk direct-/Info trailer (QPDF export)", function(T)
+    if not have_pdftk() then return end
+    local platform = require("bm_platform")
+    local before = temp_snapshot(platform)
+    local f, p, src, out = setup(T, {direct_info = true, pages = {
+      {layers = {{name = "L"}, {name = "Bookmark::Ch 1"}, {name = "Bookmark::## 1.1"}}},
+      {layers = {{name = "L"}, {name = "Bookmark::Ch 2"}}},
+      {},
+    }})
+    before[src:match("[^/]+$")] = true
+    export_with_bookmarks()
+    T.eq(f.messages[#f.messages].error, false, f.messages[#f.messages].msg)
+    T.list_eq(outline_of(out), {"Ch 1@1:1", "1.1@2:1", "Ch 2@1:2"})
+    os.remove(src)
+    os.remove(out)
+    T.list_eq(leftover_temp_files(p, before), {}, "leftover temp files")
   end},
 }
