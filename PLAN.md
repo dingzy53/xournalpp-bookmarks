@@ -4,7 +4,7 @@
 >
 > Baseline on this machine (Lua 5.4.8, `pdftk-java` installed): `luac -p Bookmarks/*.lua tests/*.lua` clean; `lua tests/run.lua` passes `57 passed, 0 failed`.
 >
-> **Status:** Code, tests, CI, selftest, and README implemented locally on `main` (unpushed). Version bump/tag and `docs/images/hero.png` wait on Mac computer-use verification.
+> **Status:** Code, tests, CI, selftest, and README updated on `refactor/simplify-1.3` with macOS UAT fixes (`xopp-mac-uat-2026-11-27`). Version bump/tag and final hero screenshot wait on macOS retest.
 
 ---
 
@@ -64,3 +64,12 @@
    - `import_pdf_outline` when user cancels or chooses `"Keep existing"`.
    - Batch `add_bookmarks` / `delete_bookmarks` preserving active layers across multiple pages.
 4. **CI & local in-app test:** run `luac5.4 -p Bookmarks/*.lua tests/*.lua` in `.github/workflows/ci.yml`, and add `scripts/selftest.sh` using a throwaway `XDG_CONFIG_HOME` against real `xournalpp`.
+
+---
+
+## 5. Mac UAT Fixes (`xopp-mac-uat-2026-11-27`)
+
+1. **Avoid macOS `ncruces/zenity` deadlock (`Bookmarks/bm_platform.lua`):** pass `--modal=false` before dialog flags when `is_mac() and zenity_flavor() == "ncruces"`.
+2. **Recover from `pdftk-java` direct-`/Info` `ClassCastException` on QPDF exports (`Bookmarks/bm_pdf.lua`):** if `update_info_utf8` fails, normalize via `pdftk src cat output norm` and retry.
+3. **Treat `app.openDialog` as plain text & show Manager validation errors synchronously (`Bookmarks/bm_doc.lua`, `Bookmarks/bm_ui.lua`, `Bookmarks/main.lua`):** remove HTML escaping (Xournal++ `XojMsgBox` renders secondary text via `gtk_message_dialog_format_secondary_text`), and use `ui.error` in `move_bookmark_dialog`.
+4. **Store bookmark layers below user layers & protect annotated layers (`Bookmarks/bm_doc.lua`, `Bookmarks/main.lua`):** use `layer-new-below-current` for the first bookmark on a page so reopening `.xopp` activates the user's top layer, and keep `isAnnotated` bookmark layers visible as `Recovered: …` instead of deleting ink.

@@ -54,7 +54,7 @@ Restart Xournal++ afterwards. Be aware that this permission lets Xournal++ (and 
 brew install zenity pdftk-java
 ```
 
-`brew install ncruces/tap/zenity` is a lighter alternative to GNOME zenity, with native macOS dialogs.
+`brew install zenity` installs native macOS dialogs via [ncruces/zenity](https://github.com/ncruces/zenity).
 
 **Without Xcode (macOS 14 Sonoma, older macOS, or Intel Macs):** Homebrew's `openjdk` formula only has bottles for Apple Silicon on macOS 15+. On older versions or Intel Macs, `brew install pdftk-java` tries to build OpenJDK from source, which needs full Xcode (Command Line Tools alone are not enough). Instead, install zenity and [Eclipse Temurin](https://adoptium.net/), then wrap `pdftk-all.jar` from [pdftk-java releases](https://gitlab.com/pdftk-java/pdftk/-/releases) in `~/.local/bin/pdftk`:
 
@@ -126,7 +126,9 @@ All actions can be added to a toolbar (**View → Toolbars → Customize**) as `
 
 ## How bookmarks are stored
 
-Each bookmark is a hidden layer on its page, named `Bookmark::<title>`, or `Bookmark::## <title>` for level 2, and so on. Bookmarks are saved inside the `.xopp` file and move with their page. You can see and rename them in the Layer sidebar. The outline order is page order, then layer order within a page, and new bookmarks are added on top. To reorder bookmarks on one page, move their layers.
+Each bookmark is a hidden layer on its page, named `Bookmark::<title>`, or `Bookmark::## <title>` for level 2, and so on. Bookmarks are saved inside the `.xopp` file and move with their page. You can see and rename them in the Layer sidebar.
+
+New bookmarks are placed below your drawing layers (in creation order), so reopening a document selects your drawing layer instead of a bookmark layer. If you ever draw on a bookmark layer and then delete or move that bookmark, the plugin keeps the layer visible as a normal layer (`Recovered: …`) instead of deleting your ink. To reorder bookmarks on one page, move their layers.
 
 Older versions of this plugin (and the original upstream plugin) still see nested bookmarks. They show them flat, with the `##` prefix as part of the title.
 
@@ -144,6 +146,7 @@ Older versions of this plugin (and the original upstream plugin) still see neste
 - On Windows, double quotes in bookmark names are shown as `''` in dialogs, because `cmd.exe` cannot pass them safely. The stored name stays unchanged unless you edit it.
 - Each layer change (for example promoting a bookmark with 3 sub-bookmarks) is a separate undo step.
 - Duplicating a page also duplicates its bookmarks.
+- On macOS, Xournal++'s Save dialog may stay open behind the export confirmation dialog until dismissed (`Esc`).
 
 ## Development
 

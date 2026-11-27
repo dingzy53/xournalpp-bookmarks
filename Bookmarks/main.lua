@@ -128,10 +128,19 @@ local function shift_subtree(list, i, delta)
   doc.rename_bookmarks(edits)
 end
 
+local function warn_preserved(preserved)
+  if preserved and preserved > 0 then
+    ui.info("Annotations Preserved",
+      string.format("%d bookmark layer%s had drawing content and %s kept visible as a normal layer.",
+        preserved, preserved == 1 and "" or "s", preserved == 1 and "was" or "were"))
+  end
+end
+
 local function delete_with_choice(list, i)
   local last = model.subtree_end(list, i)
   if last == i then
-    doc.delete_bookmark(list[i].page, list[i].layer)
+    local _, preserved = doc.delete_bookmark(list[i].page, list[i].layer)
+    warn_preserved(preserved)
     return
   end
   local n = last - i
@@ -149,11 +158,13 @@ local function delete_with_choice(list, i)
       edits[#edits + 1] = {page = b.page, layer = b.layer, title = b.title, level = b.eff - 1}
     end
     doc.rename_bookmarks(edits)
-    doc.delete_bookmark(list[i].page, list[i].layer)
+    local _, preserved = doc.delete_bookmark(list[i].page, list[i].layer)
+    warn_preserved(preserved)
   elseif c == 2 then
     local doomed = {}
     for j = i, last do doomed[#doomed + 1] = list[j] end
-    doc.delete_bookmarks(doomed)
+    local _, preserved = doc.delete_bookmarks(doomed)
+    warn_preserved(preserved)
   end
 end
 
@@ -177,10 +188,11 @@ local function move_bookmark_dialog(b, numPages)
     return
   end
   if newPage == b.page then return end
-  doc.delete_bookmark(b.page, b.layer)
+  local _, preserved = doc.delete_bookmark(b.page, b.layer)
   doc.add_bookmark(newPage, b.title, b.eff)
   app.setCurrentPage(newPage)
   app.scrollToPage(newPage)
+  warn_preserved(preserved)
 end
 
 -- Ask what to do with list[i]. Returns true when the manager should close.
@@ -368,13 +380,17 @@ function import_pdf_outline()
   end
 
   local existing = model.collect(structure)
+  local preserved = 0
   if #existing > 0 then
     if not need("zenity") then return end
     local choices = {"Replace all existing bookmarks", "Keep existing bookmarks and add the imported ones"}
     local c = ui.choose("Import Bookmarks from PDF Outline",
       "This document already has bookmarks.", "Existing bookmarks", choices)
     if not c then return end
-    if c == 1 then doc.delete_bookmarks(existing) end
+    if c == 1 then
+      local _, p = doc.delete_bookmarks(existing)
+      preserved = p or 0
+    end
   end
 
   local to_add, skipped = {}, 0
@@ -392,6 +408,10 @@ function import_pdf_outline()
   if skipped > 0 then
     msg = msg .. string.format("\n%d entr%s skipped: their PDF page is not in this document.", skipped,
       skipped == 1 and "y was" or "ies were")
+  end
+  if preserved > 0 then
+    msg = msg .. string.format("\n%d bookmark layer%s with drawing content %s kept visible as a normal layer.",
+      preserved, preserved == 1 and "" or "s", preserved == 1 and "was" or "were")
   end
   show_msg(msg, false)
 end

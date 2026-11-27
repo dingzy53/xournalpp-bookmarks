@@ -36,7 +36,10 @@ local function steps()
 
   local s1 = app.getDocumentStructure()
   check(s1.currentPage == 1, "currentPage preserved")
-  check(s1.pages[1].currentLayer == 1 and s1.pages[2].currentLayer == 1, "active layers preserved")
+  check(s1.pages[1].layers[s1.pages[1].currentLayer].name == "Layer 1", "page 1 active layer preserved")
+  check(s1.pages[2].layers[s1.pages[2].currentLayer].name == "Layer 1", "page 2 active layer preserved")
+  check(s1.pages[1].layers[1].name == "Bookmark::Intro & Plan" and s1.pages[1].layers[2].name == "Layer 1",
+    "bookmark layer placed below user layer")
   local list = model.collect(s1)
   check(#list == 3 and list[2].eff == 2, "model.collect sees 3 bookmarks")
 
@@ -66,6 +69,13 @@ local function steps()
   -- 4. Save .xopp so selftest.sh can inspect persisted bookmark layers
   app.activateAction("save")
   coroutine.yield("wait")
+
+  -- 5. Reopen saved .xopp: active layer must be the user layer ("Layer 1"), not a bookmark layer
+  check(app.openFile(os.getenv("BM_DOC"), 1, true), "reopen saved fixture")
+  coroutine.yield("wait")
+  local s2 = app.getDocumentStructure()
+  check(s2.pages[1].layers[s2.pages[1].currentLayer].name == "Layer 1", "reopen page 1 activates user layer")
+  check(s2.pages[2].layers[s2.pages[2].currentLayer].name == "Layer 1", "reopen page 2 activates user layer")
   log("DONE failures=" .. failures)
 end
 

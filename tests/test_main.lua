@@ -29,13 +29,13 @@ return {
     T.eq(ok, false, "registerUi outside initUi must error")
   end},
 
-  {"new_bookmark adds a hidden layer and keeps the current layer", function(T)
+  {"new_bookmark adds a hidden layer below user layers and keeps the active layer", function(T)
     local f = doc()
     T.load_plugin(f)
     new_bookmark("Hello\nWorld")
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Hello World"})
-    T.eq(f.pages[1].layers[2].visible, false)
-    T.eq(f.pages[1].current, 1)
+    T.list_eq(f:names(1), {"Bookmark::Hello World", "Layer 1"})
+    T.eq(f.pages[1].layers[1].visible, false)
+    T.eq(f.pages[1].current, 2)
   end},
 
   {"dialog_new_bookmark cancelled does nothing", function(T)
@@ -77,7 +77,7 @@ return {
     local platform = T.load_plugin(f)
     local calls = T.script_dialogs(platform, {"New Bookmark…", "Intro", "1", "Jump To"})
     view_bookmarks()
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Intro"})
+    T.list_eq(f:names(1), {"Bookmark::Intro", "Layer 1"})
     local first_prompt = table.concat(calls[1], "|")
     T.truthy(first_prompt:find("New Bookmark…", 1, true), first_prompt)
     T.truthy(first_prompt:find("Import from PDF Outline", 1, true), first_prompt)
@@ -130,7 +130,7 @@ return {
     T.script_dialogs(platform, {"1", "Move to Page…", "3"})
     view_bookmarks()
     T.list_eq(f:names(2), {"Layer 1"})
-    T.list_eq(f:names(3), {"Layer 1", "Bookmark::Two"})
+    T.list_eq(f:names(3), {"Bookmark::Two", "Layer 1"})
     T.eq(f.currentPage, 3)
   end},
 
@@ -138,20 +138,23 @@ return {
     local f = doc()
     local platform = T.load_plugin(f)
     new_bookmark("A")
+    new_bookmark("B")
     T.script_dialogs(platform, {"1", "Delete"})
     view_bookmarks()
     for _, l in ipairs(f.log) do T.truthy(not l:find("^layerAction"), "deprecated call: " .. l) end
-    T.truthy(table.concat(f.log, ","):find("activateAction:layer-new-above-current", 1, true))
-    T.truthy(table.concat(f.log, ","):find("activateAction:layer-delete", 1, true))
+    local joined = table.concat(f.log, ",")
+    T.truthy(joined:find("activateAction:layer-new-below-current", 1, true))
+    T.truthy(joined:find("activateAction:layer-new-above-current", 1, true))
+    T.truthy(joined:find("activateAction:layer-delete", 1, true))
   end},
 
-  {"new bookmarks are appended on top so same-page order is creation order", function(T)
+  {"new bookmarks are placed below user layers in creation order", function(T)
     local f = Fake.new({pages = {{layers = {{name = "Layer 1"}, {name = "Layer 2"}}, current = 1}}})
     T.load_plugin(f)
     new_bookmark("First")
     new_bookmark("Second")
-    T.list_eq(f:names(1), {"Layer 1", "Layer 2", "Bookmark::First", "Bookmark::Second"})
-    T.eq(f.pages[1].current, 1, "user's layer stays selected")
+    T.list_eq(f:names(1), {"Bookmark::First", "Bookmark::Second", "Layer 1", "Layer 2"})
+    T.eq(f.pages[1].current, 3, "user's layer stays selected")
   end},
 
   {"background layer is never treated as a bookmark", function(T)
@@ -271,14 +274,14 @@ return {
 
   {"new bookmark dialog is pre-filled with the sibling level", function(T)
     local f = Fake.new({pages = {
-      {layers = {{name = "L"}, {name = "Bookmark::Ch"}, {name = "Bookmark::## Sec"}}},
+      {layers = {{name = "Bookmark::Ch"}, {name = "Bookmark::## Sec"}, {name = "L"}}},
       {layers = {{name = "L"}}},
     }, currentPage = 2})
     local platform = T.load_plugin(f)
     local calls = T.script_dialogs(platform, {"## Next sec"})
     dialog_new_bookmark()
     T.eq(calls[1][#calls[1]], "--entry-text=## ")
-    T.list_eq(f:names(2), {"L", "Bookmark::## Next sec"})
+    T.list_eq(f:names(2), {"Bookmark::## Next sec", "L"})
   end},
 
   {"no-dialog bookmark becomes a sibling of the previous one", function(T)
@@ -286,7 +289,7 @@ return {
       currentPage = 2})
     T.load_plugin(f)
     new_bookmark()
-    T.list_eq(f:names(2), {"Layer 1", "Bookmark::## "}, "eff level of '### Deep' after normalization is 2")
+    T.list_eq(f:names(2), {"Bookmark::## ", "Layer 1"}, "eff level of '### Deep' after normalization is 2")
   end},
 
   {"Rename keeps the level and can change it", function(T)
@@ -303,7 +306,7 @@ return {
     local platform = T.load_plugin(f)
     T.script_dialogs(platform, {"2", "Move to Page…", "2"})
     view_bookmarks()
-    T.list_eq(f:names(2), {"Layer 1", "Bookmark::## B"})
+    T.list_eq(f:names(2), {"Bookmark::## B", "Layer 1"})
   end},
 
   {"manager: demote and promote move the whole subtree", function(T)
@@ -357,5 +360,47 @@ return {
     view_bookmarks()
     T.list_eq(f:names(1), {"L"})
     T.list_eq(f:names(2), {"L", "Bookmark::B"})
+  end},
+
+  {"deleting an annotated bookmark layer preserves ink as a visible recovered layer", function(T)
+    local f = Fake.new({pages = {
+      {layers = {
+        {name = "Bookmark::Ch 1", visible = false, annotated = true},
+        {name = "Layer 1"},
+      }, current = 2},
+    }})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"1", "Delete"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"Recovered: Ch 1", "Layer 1"})
+    T.eq(f.pages[1].layers[1].visible, true, "recovered layer is made visible")
+    T.eq(f.pages[1].current, 2, "user's active layer stays selected")
+    T.eq(calls[3][2], "--info", "user is notified via zenity info dialog")
+  end},
+
+  {"moving an annotated bookmark preserves ink on the original page", function(T)
+    local f = Fake.new({pages = {
+      {layers = {
+        {name = "Bookmark::Ch 1", visible = false},
+        {name = "Bookmark::## Sec", visible = false, annotated = true},
+        {name = "Layer 1"},
+      }, current = 3},
+      {layers = {{name = "Layer 1"}}},
+    }})
+    local platform = T.load_plugin(f)
+    local calls = T.script_dialogs(platform, {"2", "Move to Page…", "2"})
+    view_bookmarks()
+    T.list_eq(f:names(1), {"Bookmark::Ch 1", "Recovered: Sec", "Layer 1"})
+    T.eq(f.pages[1].layers[2].visible, true)
+    T.list_eq(f:names(2), {"Bookmark::## Sec", "Layer 1"})
+    T.eq(calls[4][2], "--info", "user is notified that original layer annotations were kept")
+  end},
+
+  {"new bookmarks keep background selected when orig_layer is 0", function(T)
+    local f = Fake.new({pages = {{layers = {{name = "Layer 1"}}, current = 0}}})
+    T.load_plugin(f)
+    new_bookmark("Cover")
+    T.list_eq(f:names(1), {"Bookmark::Cover", "Layer 1"})
+    T.eq(f.pages[1].current, 0)
   end},
 }

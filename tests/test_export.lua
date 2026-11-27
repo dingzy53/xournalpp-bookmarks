@@ -246,10 +246,10 @@ return {
     T.load_plugin(f)
     T.eq(f.structure_calls, 0, "fresh doc has 0 calls")
     import_pdf_outline()
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Layer 1"})
     T.list_eq(f:names(2), {"Layer 1"})
-    T.list_eq(f:names(3), {"Layer 1", "Bookmark::## 1.1 日本"})
-    T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
+    T.list_eq(f:names(3), {"Bookmark::## 1.1 日本", "Layer 1"})
+    T.list_eq(f:names(4), {"Bookmark::### 1.1.1", "Bookmark::Ch 2", "Layer 1"})
     T.eq(f.structure_calls, 2, "import reads structure once then batches additions")
     T.truthy(f.messages[#f.messages].msg:find("Imported 4 bookmarks", 1, true), f.messages[#f.messages].msg)
 
@@ -257,18 +257,18 @@ return {
     local p = require("bm_platform")
     T.script_dialogs(p, {false})
     import_pdf_outline()
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Layer 1"})
 
     -- "Keep existing" appends imported entries
     T.script_dialogs(p, {"Keep existing bookmarks and add the imported ones"})
     import_pdf_outline()
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Bookmark::Ch 1 & intro", "Layer 1"})
 
     -- "Replace" leaves exactly one copy
     T.script_dialogs(p, {"Replace all existing bookmarks"})
     import_pdf_outline()
-    T.list_eq(f:names(4), {"Layer 1", "Bookmark::### 1.1.1", "Bookmark::Ch 2"})
-    T.list_eq(f:names(1), {"Layer 1", "Bookmark::Ch 1 & intro"})
+    T.list_eq(f:names(4), {"Bookmark::### 1.1.1", "Bookmark::Ch 2", "Layer 1"})
+    T.list_eq(f:names(1), {"Bookmark::Ch 1 & intro", "Layer 1"})
     os.remove(bg)
   end},
 

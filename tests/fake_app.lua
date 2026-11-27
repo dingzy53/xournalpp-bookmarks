@@ -14,7 +14,7 @@ function Fake.new(opts)
   for i, p in ipairs(opts.pages or {{}}) do
     local layers = {}
     for j, l in ipairs(p.layers or {{name = "Layer 1"}}) do
-      layers[j] = {name = l.name or ("Layer " .. j), visible = l.visible ~= false}
+      layers[j] = {name = l.name or ("Layer " .. j), visible = l.visible ~= false, annotated = l.annotated == true}
     end
     self.pages[i] = {layers = layers, current = p.current or #layers, pdfPage = p.pdfPage or 0}
   end
@@ -54,7 +54,7 @@ function Fake:install()
     for i, p in ipairs(s.pages) do
       local layers = {[0] = {isVisible = true, name = "Background"}}
       for j, l in ipairs(p.layers) do
-        layers[j] = {name = l.name, isVisible = l.visible, isAnnotated = false}
+        layers[j] = {name = l.name, isVisible = l.visible, isAnnotated = l.annotated == true}
       end
       pages[i] = {layers = layers, currentLayer = p.current, pdfBackgroundPageNo = p.pdfPage}
     end
@@ -89,7 +89,15 @@ function Fake:install()
   local function new_layer_above()
     local p = s:page()
     local pos = p.current -- insert after current (0-based index == current id)
-    table.insert(p.layers, pos + 1, {name = "", visible = true})
+    table.insert(p.layers, pos + 1, {name = "", visible = true, annotated = false})
+    p.current = pos + 1
+  end
+
+  local function new_layer_below()
+    local p = s:page()
+    local pos = p.current - 1 -- insert before current (0-based index)
+    if pos < 0 then error("layer-new-below-current requires non-background layer") end
+    table.insert(p.layers, pos + 1, {name = "", visible = true, annotated = false})
     p.current = pos + 1
   end
 
@@ -97,13 +105,14 @@ function Fake:install()
     local p = s:page()
     if p.current == 0 then return end
     table.remove(p.layers, p.current)
-    if #p.layers == 0 then p.layers[1] = {name = "", visible = true} end
+    if #p.layers == 0 then p.layers[1] = {name = "", visible = true, annotated = false} end
     p.current = #p.layers -- XojPage::removeLayer resets to npos == top layer
   end
 
   function app.activateAction(a)
     table.insert(s.log, "activateAction:" .. a)
     if a == "layer-new-above-current" then new_layer_above()
+    elseif a == "layer-new-below-current" then new_layer_below()
     elseif a == "layer-delete" then delete_current_layer()
     else error("unknown action " .. a) end
   end

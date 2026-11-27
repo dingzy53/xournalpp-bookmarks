@@ -12,8 +12,17 @@ function M.new_layer_above_current()
   app.activateAction("layer-new-above-current")
 end
 
+function M.new_layer_below_current()
+  app.activateAction("layer-new-below-current")
+end
+
 function M.delete_current_layer()
   app.activateAction("layer-delete")
+end
+
+local function is_bookmark_layer(info, layer)
+  local l = info and info.layers[layer]
+  return layer >= 1 and l ~= nil and model.title_of(l.name) ~= nil
 end
 
 local function set_layer_clamped(id, max_layer)
@@ -57,27 +66,39 @@ function M.add_bookmarks(entries)
       app.setCurrentPage(page)
       cur_page = page
     end
-    set_layer_clamped(#info.layers, #info.layers)
-    for _, e in ipairs(list) do
-      M.new_layer_above_current()
-      app.setCurrentLayerName(model.layer_name(e.title, e.level))
-      app.setLayerVisibility(false)
-      added = added + 1
+    -- Insert bookmarks below user drawing layers (after any existing leading bookmarks)
+    -- so reopening a .xopp activates the topmost user layer instead of a bookmark layer.
+    local last_bm = 0
+    while last_bm < #info.layers and is_bookmark_layer(info, last_bm + 1) do
+      last_bm = last_bm + 1
     end
-    set_layer_clamped(orig_layer, #info.layers + #list)
+    if last_bm == 0 and #info.layers >= 1 then
+      set_layer_clamped(1, #info.layers)
+      for idx, e in ipairs(list) do
+        if idx == 1 then M.new_layer_below_current() else M.new_layer_above_current() end
+        app.setCurrentLayerName(model.layer_name(e.title, e.level))
+        app.setLayerVisibility(false)
+        added = added + 1
+      end
+    else
+      set_layer_clamped(last_bm, #info.layers)
+      for _, e in ipairs(list) do
+        M.new_layer_above_current()
+        app.setCurrentLayerName(model.layer_name(e.title, e.level))
+        app.setLayerVisibility(false)
+        added = added + 1
+      end
+    end
+    local restored = orig_layer > last_bm and (orig_layer + #list) or orig_layer
+    set_layer_clamped(restored, #info.layers + #list)
   end
   if cur_page ~= orig_page then app.setCurrentPage(orig_page) end
   return added
 end
 
--- Add a hidden bookmark layer on top of `page`.
+-- Add a hidden bookmark layer below user layers on `page`.
 function M.add_bookmark(page, title, level)
   return M.add_bookmarks({{page = page, title = title, level = level}}) > 0
-end
-
-local function is_bookmark_layer(info, layer)
-  local l = info and info.layers[layer]
-  return layer >= 1 and l ~= nil and model.title_of(l.name) ~= nil
 end
 
 -- Rename one or more bookmark layers ({page, layer, title, level}) in one scan.
@@ -124,9 +145,11 @@ function M.rename_bookmark(page, layer, title, level)
 end
 
 -- Delete several bookmarks ({page, layer}). Highest (page, layer) first, because
--- deleting a layer renumbers the layers above it.
+-- deleting a layer renumbers the layers above it. Bookmark layers that contain
+-- strokes/images/text (`isAnnotated`) are converted into visible normal layers instead
+-- of being deleted so user content is never destroyed. Returns acted, preserved_count.
 function M.delete_bookmarks(list)
-  if #list == 0 then return false end
+  if #list == 0 then return false, 0 end
   local s = app.getDocumentStructure()
   local by_page, seen = {}, {}
   for _, b in ipairs(list) do
@@ -145,7 +168,7 @@ function M.delete_bookmarks(list)
 
   local orig_page = s.currentPage
   local cur_page = orig_page
-  local deleted = false
+  local deleted, preserved = false, 0
   for _, page in ipairs(sorted_pages(by_page, true)) do
     local layers = by_page[page]
     table.sort(layers, function(a, b) return a > b end)
@@ -157,17 +180,26 @@ function M.delete_bookmarks(list)
       cur_page = page
     end
     for _, layer in ipairs(layers) do
+      local l = info.layers[layer]
       if pcall(app.setCurrentLayer, layer) then
-        M.delete_current_layer()
-        deleted = true
-        if current >= layer then current = math.max(current - 1, 1) end
-        remaining = math.max(remaining - 1, 1)
+        if l and l.isAnnotated then
+          local _, title = model.parse_title(model.title_of(l.name) or "")
+          app.setCurrentLayerName(title ~= "" and ("Recovered: " .. title) or "Recovered Layer")
+          app.setLayerVisibility(true)
+          deleted = true
+          preserved = preserved + 1
+        else
+          M.delete_current_layer()
+          deleted = true
+          if current >= layer then current = math.max(current - 1, 1) end
+          remaining = math.max(remaining - 1, 1)
+        end
       end
     end
     set_layer_clamped(current, remaining)
   end
   if cur_page ~= orig_page then app.setCurrentPage(orig_page) end
-  return deleted
+  return deleted, preserved
 end
 
 function M.delete_bookmark(page, layer)
